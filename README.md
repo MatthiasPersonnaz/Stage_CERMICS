@@ -1,4 +1,4 @@
-# pert_BO_stage_CERMICS
+# Vérification de l'approximation de Born-Oppenheimer dans un cadre simplifié
 Dépôt GitHub pour les codes implémentant la théorie des perturbations avec l'approximation de Born-Oppenheimer lors de mon stage au CERMICS.
 
 
