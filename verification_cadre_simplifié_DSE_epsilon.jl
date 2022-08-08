@@ -14,7 +14,6 @@ using LinearMaps
 @show Threads.nthreads();
 
 
-
 function assembly(T,J,N,N²)
     println("assembly"); flush(stdout)
     Λ = spzeros(N²,N²);
@@ -23,7 +22,7 @@ function assembly(T,J,N,N²)
     end
     
     @views for i in 1:N-1
-        Λ[1+(i-1)* N : i    *N, 1+(i)  *N :  (i+1)*N] .= J[:,:] # remplissage blocs etradiag supérieurs
+        Λ[1+(i-1)* N : i    *N, 1+(i)  *N :  (i+1)*N] .= J[:,:] # remplissage blocs extradiag supérieurs
         Λ[1+(i)  * N : (i+1)*N, 1+(i-1)*N :      i*N] .= J[:,:] # remplissage blocs extradiag inférieurs
     end
     return Λ
@@ -53,7 +52,7 @@ function hamiltonian_1D(Δd², N, V, m)
     Λ = -1/(Δd²*2*m)*SymTridiagonal(-2*ones(Float64,N),ones(Float64,N-1));
     V = Diagonal(V); # V_fun.(LinRange(r_min,r_max,N)) pour créer l'argument
     H = Λ + V; 
-    H, Λ, V
+    return H, Λ, V
 end
 
 
@@ -73,7 +72,7 @@ function hamiltonian_2D_rescaled(δr, δr², δu, δu², N, N², V, m, ϵ², K)
     V = Diagonal(reshape(V,N²)); # a priori inutile de convertir en sparse avant
 
     H = Λ + V;
-    H, Λ, V # opérateurs (matrices de taille N²×N²)
+    return H, Λ, V # opérateurs (matrices de taille N²×N²)
 end
 
 x = variable(Polynomial{Rational{Int}})
@@ -83,7 +82,7 @@ H = [SpecialPolynomials.basis(Hermite, i)(x) for i in 0:3] # /!\ au décalage d'
 
 
 function get_parameters(r_min, r_max, R_min, R_max, N, m, M)
-    println("get_parameters"); flush(stdout)
+    println("GET_PARAMETERS"); flush(stdout)
     δr = (r_max-r_min)/(N-1);
     δR = (R_max-R_min)/(N-1);
     δr² = δr*δr;
@@ -123,7 +122,6 @@ function get_lowest_surface_energy(Λr, δR, R_min, rs, N)
         lE₀[j]     = infos.converged>=1 ? vals[1] + V_nucl_nucl(R_min + j*δR)  : NaN;
         # on récupère l'énergie  propre du niveau fondamental sur la tranche à R fixé
     end  
-
     # CALCUL DU R₀ ET DES RAIDEURS
     E₀_at_R₀, ind_R₀ = findmin(lE₀);       # trouver l'énergie de surface minimale
     R₀               = ind_R₀*δR + R_min;  # définir le paramètre nucléaire minimisant l'énergie de surface
@@ -181,6 +179,10 @@ function get_parameters_rescaled(u_min, u_max, δu, δu², us, ug, K, M, N, N²,
 
     # CONSTRUCTION DU POTENTIEL ET DU HAMILTONIEN NON PERTURBÉS HBO SUR GRILLE
     Ĥ⁰ = Λ + V̂⁰Rg; # hamiltonien HBO non perturbé paramétré en R
+
+    # création du laplacien 2D sur grille qui factorise les deux cas 𝔥₀ et 𝔥
+    # à compléter
+
     𝔥₀,~,~  = hamiltonian_2D_rescaled(δr, δr², δu, δu², N, N², V₀ug, m, ϵ², K); # hamiltonien HBO non perturbé paramétré en u
 
     # pour + tard: symétriser un peu la construction de ces variables
@@ -220,7 +222,6 @@ end
 
 
 function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim, Qmax)
-    println("decompose_hamiltonian_rescaled"); flush(stdout)
     l = length(lM);
     l_Ψ_pert = zeros(N*N,l);
     l_Ψ_true = zeros(N*N,l);
@@ -229,10 +230,14 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     l_E_pert = zeros(l);
     l_Ψ_err  = zeros(l);
     l_E_err  = zeros(l);
-
     u_min, u_max, δu, δu², us, ug = get_rescaling(N);
+    λ_approx = zeros(l);
+    Kϵ²      = zeros(l);
+    résidus_approx  = zeros(l);
+    résidus_pert    = zeros(l);
+    
 
-    ############# COMMENCER LA BOUCLE ICI POUR LA MASSE (ce qui précède ne change pas si M change) #############
+    ############# ICI COMMENCE LA BOUCLE POUR LA MASSE (ce qui précède ne change pas si M change) #############
     ind_M = 1;
 
     for M in lM
@@ -298,11 +303,8 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         l_Ψ_pert[:,ind_M] += ϵ*llΨ[:,1];
         l_E_pert[ind_M]   += ϵ*llE[1];
 
-
-
         ### GRADIENTS CONJUGUÉS ordres 2+ et sauvegarde ###
         WlmE₁ = LinearMap(x -> W*x-llE[1]*x, N²);
-
 
         R_ort  = -Π_ort*WlmE₁;
         R_par  = -Π_par*WlmE₁;
@@ -310,8 +312,6 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         acc_b   = zeros(N²);
         acc_ort = zeros(N²);
         acc_par = zeros(N²);
-
-
 
         for q ∈ 2:Qmax
             # calcul énergie ordre q
@@ -341,21 +341,26 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
             l_E_pert[ind_M]  += ϵ^q*llE[q];
         end
    
-        l_Ψ_err[ind_M] = norm(l_Ψ_pert[:,ind_M] - l_Ψ_true[:,ind_M]);
-        l_E_err[ind_M] = abs(l_E_pert[ind_M] - l_E_true[ind_M]);
+        l_Ψ_err[ind_M]  = norm(l_Ψ_pert[:,ind_M] - l_Ψ_true[:,ind_M]);
+        l_E_err[ind_M]  = abs(l_E_pert[ind_M] - l_E_true[ind_M]);
+        # calcul inégalité de Kato-Temple:
+        λ_approx[ind_M] = dot(l_Ψ_pert[:,ind_M], 𝔥, l_Ψ_pert[:,ind_M]);
+        résidus_approx[ind_M]  = norm(𝔥*l_Ψ_pert[:,ind_M] - λ_approx[ind_M]*l_Ψ_pert[:,ind_M]);
+        résidus_pert[ind_M]    = norm(𝔥*l_Ψ_pert[:,ind_M] - l_E_pert[ind_M]*l_Ψ_pert[:,ind_M]);
+        Kϵ²[ind_M]      = K*ϵ²;
         ind_M += 1;
     end
-    return l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
-           δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR, # paramètres
+    return λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
+           #δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR, # paramètres
            u_min, u_max, δu, δu², us, ug # rescaling
 end
 
 
 
-me = 1; mp = 500;
+me = 1; mp = 500; Qmax=2;
 M=(2*mp^3+mp^2*me)/(2*mp*(me+mp));
 m=(2*mp^2*me)/(mp*(2*mp+me)); 
-r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=80; ω=1.; kdim=30; # augmenter la dimension Krylov quand N est grand: pour N=200, prendre kdim=50
+r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=100; ω=1.; kdim=30; # augmenter la dimension Krylov quand N est grand: pour N=200, prendre kdim=50
 β=1.5; η=.5; V0=1.5; σ=1.;
 
 
@@ -367,11 +372,13 @@ function V_nucl_nucl(R)
      return + β/sqrt(η^2+R^2) # potentiel interaction des 2 noyaux entre eux
 end
 
-Qmax = 2;
-lM = [20, 100, 500, 1000, 2000, 3000, 5000];
-l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
-           δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR, 
-           u_min, u_max, δu, δu², us, ug,  = decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim, Qmax);
+
+lM = [20, 100, 500, 1000, 2000, 3000, 4000, 5000, 6000, 7000];
+
+@time λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
+            #δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR,
+            u_min, u_max, δu, δu², us, ug = decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim, Qmax);
+
 
 heatmap(rs, us, reshape(l_Ψ_pert[:,2],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
 heatmap(rs, us, reshape(l_Ψ_true[:,2],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
@@ -379,3 +386,9 @@ heatmap(rs, us, reshape(l_Ψ_HBO[:,2],N,N)'.^2, xlabel="coordonnée électroniqu
 
 plot(lM, l_E_err, yaxis=:log, seriestype = :scatter, label="erreur énergie", xlabel="masse M", ylabel="|E - Eₚ|",size=(400,200))
 plot(lM, l_Ψ_err, yaxis=:log, seriestype = :scatter, label="résidu", xlabel="masse M", ylabel="|Ψ - Ψₚ|",size=(400,200))
+
+
+kato_temple_est = résidus_approx.^2 ./ Kϵ²;
+plot(lM, [l_E_err, kato_temple_est, résidus_pert], yaxis=:log, seriestype = :scatter, label=["erreur énergie" "Kato-Temple" "résidu avec Eₚ"], xlabel="masse M", ylabel="|E - Eₚ|",size=(400,200)) 
+
+plot(lM, l_Ψ_err, yaxis=:log, seriestype = :scatter, label="erreur vecteur-états à la référence", xlabel="masse M", ylabel="|Ψ - Ψₚ|₂",size=(400,200))
