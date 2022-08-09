@@ -6,7 +6,7 @@ Dépôt GitHub pour les codes implémentant la théorie des perturbations avec l
 
 * `vérification_cadre_simplifié_DSE_epsilon.ipynb` et sa version scriptée `.jl` : les codes mettant en oeuvre l'approximation de BO avec théorie des perturbations pour $H_2^+$, avec rescaling
 * `routine_pb_vp_décomp_H2+_rescale.ipynb` [obselète] : les codes mettant en oeuvre l'approximation de BO avec théorie des perturbations pour $H_2^+$, avec rescaling
-* `optim_hardware_graphes.ipynb` : des codes en programmation dynamique, pour optimisez l'usage du GPU dans un cadre plus général que notre problème, en aparté
+* `optim_hardware_graphes.ipynb` : des codes en programmation dynamique, pour optimiser l'usage du GPU dans un cadre plus général que notre problème, en aparté
 * `calculs_sagemath_chgt_variables.ipynb` : calcul formel en SageMath pour le changement de variables des coordonnées
 * `routine_pb_vp_décomp_H2+.ipynb` : les codes mettant en oeuvre l'approximation de BO avec théorie des perturbations pour $H_2^+$, sans rescaling
 * `routine_pb_vp_décomp_osc_harm.ipynb` : théorie des perturbations pour l'oscillateur harmonique quantique 2D*
