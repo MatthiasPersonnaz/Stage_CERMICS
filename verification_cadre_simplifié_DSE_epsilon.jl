@@ -65,8 +65,8 @@ H = [SpecialPolynomials.basis(Hermite, i)(x) for i in 0:3] # /!\ au décalage d'
 function get_rescaling(N)
     println("calcul du rescaling"); flush(stdout)
     # NOUVEAUX PARAMETRES SUR AXE avec rescaling
-    u_min = -3.;     # à fixer de manière à ce que les conditions de Dirichlet soient satisfaites aux bords          
-    u_max =  3.;     # idem
+    u_min = -2.6;     # à fixer de manière à ce que les conditions de Dirichlet soient satisfaites aux bords          
+    u_max = +2.6;     # idem
     δu = (u_max-u_min)/(N-1);
     δu² = δu^2;
     us = Vector(u_min:δu:u_max);  # sur l'axe donne u ↦ u   
@@ -78,12 +78,13 @@ end
 
 
 
-function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim, Qmax)
+function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax)
     l = length(lM);
     l_Ψ_pert = zeros(N*N,l);
     l_Ψ_true = zeros(N*N,l);
     l_Ψ_HBO  = zeros(N*N,l);
     l_E_true = zeros(l);
+    l_E_diff = zeros(l);
     l_E_pert = zeros(l);
     l_Ψ_err  = zeros(l);
     l_E_err  = zeros(l);
@@ -109,6 +110,9 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     Rg = Rs' .* ones(N);         # sur la grille donne   (r,R) ↦ R
     V = zeros(N,N);              # sur la grille donnera (r,R) ↦ V(r,R) après évaluation ci-dessous
 
+    # vérifier si les maths en virgule flottante sont correctes:
+    @assert length(rs) == length(Rs) == length(us) == N;
+
     # CONSTRUCTION DU POTENTIEL ORIGINAL ET DU HAMILTONIEN SUR GRILLE paramétré en R
     V = @. V_nucl_el(rg, Rg) + V_nucl_nucl(Rg); # potentiel d'interaction sur la grille tous phénomènes compris
 
@@ -126,7 +130,7 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     lE₀ = zeros(N);
     Base.Threads.@threads for j in 1:N
         Vx = sparse(Diagonal(Vector(V_nucl_el.(rs,R_min+j*δR)))) # potentiel en x à R=jδR fixé (i.e. à distance noyau-noyau fixé)
-        vals, ~, infos = KrylovKit.eigsolve(Λr+Vx, N, 1, :SR, krylovdim=10);
+        vals, ~, infos = KrylovKit.eigsolve(Λr+Vx, N, 1, :SR, krylovdim=kdim1d);
         @assert infos.converged > 0;
         lE₀[j]     = infos.converged>=1 ? vals[1] + V_nucl_nucl(R_min + j*δR)  : NaN;
         # on récupère l'énergie  propre du niveau fondamental sur la tranche à R fixé
@@ -204,10 +208,10 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         
         println("calcul solution_produit par Krylov"); flush(stdout)
         ### CALCUL DE LA SOLUTION-PRODUIT HARMONIC-BORN-OPPENHEIMER ###
-        lE⁰x, lϕ⁰x, infos_x = KrylovKit.eigsolve(𝔥r, N, 1, :SR, krylovdim=10); 
+        lE⁰x, lϕ⁰x, infos_x = KrylovKit.eigsolve(𝔥r, N, 1, :SR, krylovdim=kdim1d); 
         @assert infos_x.converged ≥ 1;
         
-        lE⁰u, lϕ⁰u, infos_u = KrylovKit.eigsolve(𝔥u, N, 1, :SR, krylovdim=10);
+        lE⁰u, lϕ⁰u, infos_u = KrylovKit.eigsolve(𝔥u, N, 1, :SR, krylovdim=kdim1d);
         @assert infos_u.converged ≥ 1;
 
 
@@ -224,8 +228,9 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
 
         println("calcul solution_référence par Krylov"); flush(stdout)
         ### CALCUL DE LA SOLUTION 2D POUR RÉFÉRENCE DU HAMILTONIEN D'INTÉRÊT PARAMÉTRÉ EN u ###
-        lE, lϕ, info_2d = KrylovKit.eigsolve(𝔥, N², 1, :SR, krylovdim=kdim); # KrylovKit.eigsolve plus rapide que Arpack.eigs globalement
-        @assert info_2d.converged ≥ 1;
+        lE, lϕ, info_2d = KrylovKit.eigsolve(𝔥, N², 2, :SR, krylovdim=kdim2d); # KrylovKit.eigsolve plus rapide que Arpack.eigs globalement
+        @assert info_2d.converged ≥ 2;
+        l_E_diff[ind_M] = lE[2] - lE[1];
 
         println("## théorie des perturbations"); flush(stdout)
         l_Ψ_true[:,ind_M] = lϕ[1];
@@ -281,19 +286,24 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
             # calcul état ordre q
             fill!(acc_b, 0.);
             @views acc_ort[:] = llE[q]*Ψ₀; # dernier terme de la somme de LHS dans 3.66 à i=0
-            @views acc_par[:] = llE[q]*Ψ₀; # dernier terme de la somme de LHS dans 3.67 à i=0
+            @views acc_par[:] = zeros(N²); # llE[q]*Ψ₀; # dernier terme de la somme de LHS dans 3.67 à i=0
 
             for i ∈ 1:(q-2)
                 @. acc_ort[:] = acc_ort + llE[q-i]*llΨ[:,i] # autres termes de la somme dans LHS de 3.66
-                @. acc_par[:] = acc_par + llE[q-i]*llΨ[:,i] # autres termes de la somme dans LHS de 3.67
+                # @. acc_par[:] = acc_par + llE[q-i]*llΨ[:,i] # autres termes de la somme dans LHS de 3.67
             end
             acc_ort[:] = -Π_ort(WlmE₁(llΨ[:,q-1])) + Π_ort(acc_ort); # LHS de 3.66 complet
-            acc_par[:] = -Π_par(WlmE₁(llΨ[:,q-1])) + Π_par(acc_par); # LHS de 3.66 complet
+            # acc_par[:] = -Π_par(WlmE₁(llΨ[:,q-1])) + Π_par(acc_par); # LHS de 3.66 complet
             
-            println("gradients conjugués ordre "*string(q)); flush(stdout)
+            println("gradients conjugués orthogonal ordre "*string(q)); flush(stdout)
             acc_ort[:] = cg(P_ort, acc_ort);
-            acc_par[:] = cg(P_par, acc_par)
-            llΨ[:,q] = acc_ort + acc_ort;
+            println("gradients conjugués parallèle  ordre "*string(q)); flush(stdout)
+            α = 0.;
+            for i ∈ 1:q-1
+                α -= .5*dot(llΨ[:,i], llΨ[:,q-i])
+            end
+            @views acc_par[:] = α*ΨHBO; # (sans les views) cg(P_par, acc_par)
+            llΨ[:,q] = acc_ort + acc_par;
             l_Ψ_pert[:,ind_M] += ϵ^q*llΨ[:,q];
             l_E_pert[ind_M]  += ϵ^q*llE[q];
         end
@@ -308,7 +318,7 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         Kϵ²[ind_M]      = K*ϵ²;
         ind_M += 1;
     end
-    return λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
+    return l_E_diff, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
            #δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR, # paramètres
            u_min, u_max, δu, δu², us, ug # rescaling
 end
@@ -318,7 +328,8 @@ end
 me = 1; mp = 500; Qmax=2;
 M=(2*mp^3+mp^2*me)/(2*mp*(me+mp));
 m=(2*mp^2*me)/(mp*(2*mp+me)); 
-r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=100; ω=1.; kdim=30; # kdim contrôle la dimension Krylov pour le calcul de la référence
+r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=140; ω=1.;
+kdim1d=20; kdim2d = 70;
 β=1.5; η=.5; V0=1.5; σ=1.;
 
 
@@ -327,15 +338,15 @@ function V_nucl_el(r,R)
 end
 
 function V_nucl_nucl(R)
-     return + β/sqrt(η^2+R^2) # potentiel interaction des 2 noyaux entre eux
+     return β/sqrt(η^2+R^2) # potentiel interaction des 2 noyaux entre eux
 end
 
 
-lM = [20, 100, 500, 1000, 5000, 8000];
+lM = [8000]; # [20, 100, 500, 1000, 5000, 6000, 8000, 15000];
 
-@time λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
+@time l_E_diff, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
             #δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR,
-            u_min, u_max, δu, δu², us, ug = decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim, Qmax);
+            u_min, u_max, δu, δu², us, ug = decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax);
 
 
 heatmap(rs, us, reshape(l_Ψ_pert[:,2],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
