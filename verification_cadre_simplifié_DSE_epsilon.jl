@@ -65,8 +65,8 @@ H = [SpecialPolynomials.basis(Hermite, i)(x) for i in 0:3] # /!\ au décalage d'
 function get_rescaling(N)
     println("calcul du rescaling"); flush(stdout)
     # NOUVEAUX PARAMETRES SUR AXE avec rescaling
-    u_min = -2.6;     # à fixer de manière à ce que les conditions de Dirichlet soient satisfaites aux bords          
-    u_max = +2.6;     # idem
+    u_min = -2.65;     # à fixer de manière à ce que les conditions de Dirichlet soient satisfaites aux bords          
+    u_max = +2.65;     # idem
     δu = (u_max-u_min)/(N-1);
     δu² = δu^2;
     us = Vector(u_min:δu:u_max);  # sur l'axe donne u ↦ u   
@@ -84,15 +84,17 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     l_Ψ_true = zeros(N*N,l);
     l_Ψ_HBO  = zeros(N*N,l);
     l_E_true = zeros(l);
-    l_E_diff = zeros(l);
+    # l_E_diff = zeros(l); # pour vérifier l'approximation E₁-E₀ ≈ ω₀
     l_E_pert = zeros(l);
     l_Ψ_err  = zeros(l);
     l_E_err  = zeros(l);
+    l_Ψ_H1_c = zeros(l);
     u_min, u_max, δu, δu², us, ug = get_rescaling(N);
     λ_approx = zeros(l);
     Kϵ²      = zeros(l);
     résidus_approx  = zeros(l);
     résidus_pert    = zeros(l);
+    
     
 ############# ICI COMMENCE LA BOUCLE POUR LA MASSE (ce qui précède ne change pas si M change) #############
     ind_M = 1;
@@ -110,11 +112,11 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     Rg = Rs' .* ones(N);         # sur la grille donne   (r,R) ↦ R
     V = zeros(N,N);              # sur la grille donnera (r,R) ↦ V(r,R) après évaluation ci-dessous
 
-    # vérifier si les maths en virgule flottante sont correctes:
+    # vérifier si les maths en virgule flottante sont correctes: https://0.30000000000000004.com/
     @assert length(rs) == length(Rs) == length(us) == N;
 
     # CONSTRUCTION DU POTENTIEL ORIGINAL ET DU HAMILTONIEN SUR GRILLE paramétré en R
-    V = @. V_nucl_el(rg, Rg) + V_nucl_nucl(Rg); # potentiel d'interaction sur la grille tous phénomènes compris
+    V[:,:] = @. V_nucl_el(rg, Rg) + V_nucl_nucl(Rg); # potentiel d'interaction sur la grille tous phénomènes compris
 
     # STRUCTURE DU LAPLACIEN 1D
     LS = SymTridiagonal(-2*ones(Float64,N), ones(Float64,N-1)); 
@@ -143,6 +145,8 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     
     Λ2D_elec = laplacian_2D_rescaled_dim_elec(N,N²);
     Λ2D_nucl = laplacian_2D_rescaled_dim_nucl(N,N²);
+
+    
 
     for M in lM
 
@@ -179,6 +183,7 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     
         # création du laplacien 2D sur grille qui factorise les deux cas 𝔥₀ et 𝔥
         Λ𝔥 = K*ϵ²/δu²*Λ2D_nucl + 1/(m*δr²)*Λ2D_elec;
+        
         # OPÉRATEUR RESCALÉ NON PERTURBÉ SUR GRILLE
         𝔥₀ = Λ𝔥 + V̂⁰ug                         # 𝔥 : Ψ(r,u) ∈ L²(ℝ^N^2) ↦ -1/2m × ∂²/∂r² -1/2M × ∂²/∂u² + V(r,u₀) + Kϵ²/2*(∂²E₀/∂u²)(u₀)(u-u₀)² le hamiltonien HBO non perturbé paramétré en u
     
@@ -208,6 +213,7 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         
         println("calcul solution_produit par Krylov"); flush(stdout)
         ### CALCUL DE LA SOLUTION-PRODUIT HARMONIC-BORN-OPPENHEIMER ###
+
         lE⁰x, lϕ⁰x, infos_x = KrylovKit.eigsolve(𝔥r, N, 1, :SR, krylovdim=kdim1d); 
         @assert infos_x.converged ≥ 1;
         
@@ -228,22 +234,22 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
 
         println("calcul solution_référence par Krylov"); flush(stdout)
         ### CALCUL DE LA SOLUTION 2D POUR RÉFÉRENCE DU HAMILTONIEN D'INTÉRÊT PARAMÉTRÉ EN u ###
-        lE, lϕ, info_2d = KrylovKit.eigsolve(𝔥, N², 2, :SR, krylovdim=kdim2d); # KrylovKit.eigsolve plus rapide que Arpack.eigs globalement
-        @assert info_2d.converged ≥ 2;
-        l_E_diff[ind_M] = lE[2] - lE[1];
+        lE, lϕ, info_2d = KrylovKit.eigsolve(𝔥, N², 1, :SR, krylovdim=kdim2d); # KrylovKit.eigsolve plus rapide que Arpack.eigs globalement
+        @assert info_2d.converged ≥ 1;              # mettre 2 pour trouver aussi le second mode propre
+        # l_E_diff[ind_M] = lE[2] - lE[1];
 
         println("## théorie des perturbations"); flush(stdout)
         l_Ψ_true[:,ind_M] = lϕ[1];
         l_E_true[ind_M] = lE[1];
+
         ### CALCUL DES PERTURBATIONS ###
         Ψ₀ = copy(ΨHBO);
         W =  copy(Ŵu); # W: sparse
         H₀ = copy(𝔥₀); # sparse
         E₀ = EHBO;
 
-        # Qmax   = 3;
 
-        proj = x -> dot(Ψ₀,x)*Ψ₀; # on gagne ~1 prdre de grandeur en temps en utilisant dot au lieu du produit matriciel Ψ₀*(Ψ₀'*x)
+        proj = x -> dot(Ψ₀,x)*Ψ₀; # on gagne ~1 ordre de grandeur en temps en utilisant dot au lieu du produit matriciel Ψ₀*(Ψ₀'*x)
         Π_ort  = LinearMap(x -> x - proj(x), N²); # ne pas assembler
         Π_par  = LinearMap(x -> proj(x), N²);
 
@@ -280,55 +286,56 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
             llE[q] = Ψ₀'*WlmE₁(llΨ[:,q-1]); # premier terme de 3.65
 
             for i ∈ 1:(q-2)
-                llE[q] = llE[q] - llE[q-i]* Ψ₀'*llΨ[:,i]; # somme du second terme dans 3.65
+                llE[q] = @views llE[q] - llE[q-i]* Ψ₀'*llΨ[:,i]; # somme du second terme dans 3.65
             end
 
             # calcul état ordre q
             fill!(acc_b, 0.);
-            @views acc_ort[:] = llE[q]*Ψ₀; # dernier terme de la somme de LHS dans 3.66 à i=0
-            @views acc_par[:] = zeros(N²); # llE[q]*Ψ₀; # dernier terme de la somme de LHS dans 3.67 à i=0
+            acc_ort[:] = @views llE[q]*Ψ₀; # dernier terme de la somme de LHS dans 3.66 à i=0
 
             for i ∈ 1:(q-2)
                 @. acc_ort[:] = acc_ort + llE[q-i]*llΨ[:,i] # autres termes de la somme dans LHS de 3.66
-                # @. acc_par[:] = acc_par + llE[q-i]*llΨ[:,i] # autres termes de la somme dans LHS de 3.67
             end
             acc_ort[:] = -Π_ort(WlmE₁(llΨ[:,q-1])) + Π_ort(acc_ort); # LHS de 3.66 complet
-            # acc_par[:] = -Π_par(WlmE₁(llΨ[:,q-1])) + Π_par(acc_par); # LHS de 3.66 complet
             
-            println("gradients conjugués orthogonal ordre "*string(q)); flush(stdout)
+            println("calcul gradients conjugués direction orthogonale ordre "*string(q)); flush(stdout)
             acc_ort[:] = cg(P_ort, acc_ort);
-            println("gradients conjugués parallèle  ordre "*string(q)); flush(stdout)
+
+            println("calcul coefficients direction parallèle ordre "*string(q)); flush(stdout)
             α = 0.;
             for i ∈ 1:q-1
-                α -= .5*dot(llΨ[:,i], llΨ[:,q-i])
+                α -= @views .5*dot(llΨ[:,i], llΨ[:,q-i]) # coefficient dans la direction parallèle, donnée par la normalisation de Ψ DSE
             end
-            @views acc_par[:] = α*ΨHBO; # (sans les views) cg(P_par, acc_par)
-            llΨ[:,q] = acc_ort + acc_par;
-            l_Ψ_pert[:,ind_M] += ϵ^q*llΨ[:,q];
-            l_E_pert[ind_M]  += ϵ^q*llE[q];
+            
+            llΨ[:,q] = @views acc_ort + α*ΨHBO;
+            l_Ψ_pert[:,ind_M] += @views ϵ^q*llΨ[:,q];
+            l_E_pert[ind_M]   += @views ϵ^q*llE[q];
         end
         
+        Ω_norm_H1 = sparse(I, N², N²) +  1/δu²*Λ2D_nucl + 1/δr²*Λ2D_elec;
         println("calcul résultats masse ", string(M))
-        l_Ψ_err[ind_M]  = norm(l_Ψ_pert[:,ind_M] - l_Ψ_true[:,ind_M]);
+        diff_vectors = l_Ψ_pert[:,ind_M] - l_Ψ_true[:,ind_M];
+        l_Ψ_err[ind_M]  = norm(diff_vectors);
+        l_Ψ_H1_c[ind_M] = dot(diff_vectors, Ω_norm_H1, diff_vectors);
         l_E_err[ind_M]  = abs(l_E_pert[ind_M] - l_E_true[ind_M]);
         # calcul inégalité de Kato-Temple:
-        λ_approx[ind_M] = dot(l_Ψ_pert[:,ind_M], 𝔥, l_Ψ_pert[:,ind_M]);
+        λ_approx[ind_M] = dot(l_Ψ_pert[:,ind_M], 𝔥, l_Ψ_pert[:,ind_M]); # numérateur du quotient de rayleigh
         résidus_approx[ind_M]  = norm(𝔥*l_Ψ_pert[:,ind_M] - λ_approx[ind_M]*l_Ψ_pert[:,ind_M]);
         résidus_pert[ind_M]    = norm(𝔥*l_Ψ_pert[:,ind_M] - l_E_pert[ind_M]*l_Ψ_pert[:,ind_M]);
         Kϵ²[ind_M]      = K*ϵ²;
         ind_M += 1;
     end
-    return l_E_diff, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
-           #δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR, # paramètres
+    return l_Ψ_H1_c, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
+           N², rs, Rs, rg, Rg, V, LS, Λr, # paramètres
            u_min, u_max, δu, δu², us, ug # rescaling
 end
 
 
 
-me = 1; mp = 500; Qmax=2;
+me = 1; mp = 500; Qmax=1;
 M=(2*mp^3+mp^2*me)/(2*mp*(me+mp));
 m=(2*mp^2*me)/(mp*(2*mp+me)); 
-r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=140; ω=1.;
+r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=300; ω=1.;
 kdim1d=20; kdim2d = 70;
 β=1.5; η=.5; V0=1.5; σ=1.;
 
@@ -342,22 +349,49 @@ function V_nucl_nucl(R)
 end
 
 
-lM = [8000]; # [20, 100, 500, 1000, 5000, 6000, 8000, 15000];
-
-@time l_E_diff, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
-            #δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR,
+lM = [100, 150, 250, 500, 700, 1000, 3000, 5000];
+@time l_Ψ_H1_c, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
+            N², rs, Rs, rg, Rg, V, LS, Λr,
             u_min, u_max, δu, δu², us, ug = decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax);
 
 
-heatmap(rs, us, reshape(l_Ψ_pert[:,2],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
-heatmap(rs, us, reshape(l_Ψ_true[:,2],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
-heatmap(rs, us, reshape(l_Ψ_HBO[:,2],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
+
+
+kato_temple_est = résidus_approx.^2 ./ Kϵ²;
+plot(lM, [l_E_err, kato_temple_est, résidus_pert, l_Ψ_err.^2, l_Ψ_H1_c],
+            xaxis=:log, yaxis=:log, seriestype = :scatter,
+            label=["erreur énergie à la référence: |Eₐ-E|" "Kato-Temple quotient Rayleigh: ||hΨₐ-⟨Ψₐ,h,Ψₐ⟩Ψₐ||²/ω₀ (2)" "résidu ||hΨₐ-EₐΨₐ|| (2)" "erreur état à la référence ||Ψₐ-Ψ||² (2)" "erreur état à la référence ||Ψₐ-Ψ||² (H1)"],
+            xlabel="masse M", size=(600,400), ylims=(1e-5,1e-1), legend=:bottomleft) 
+
+
+abscisses = log10.(lM[1:6]);
+ord_E = log10.(l_E_err[1:6]);
+ord_H1 = log10.(l_Ψ_H1_c[1:6]);
+ord_L2_2 = l_Ψ_err.^2;
+ord_L2 = log10.(ord_L2_2[1:6]);
+
+@show (ord_H1[6]-ord_H1[1])/(abscisses[6]-abscisses[1]);
+@show (ord_E[6]-ord_E[1])/(abscisses[6]-abscisses[1]);
+@show (ord_L2[6]-ord_L2[1])/(abscisses[6]-abscisses[1]);
+
+
+heatmap(rs, us, reshape(l_Ψ_pert[:,6],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
+heatmap(rs, us, reshape(l_Ψ_true[:,6],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
+heatmap(rs, us, reshape(l_Ψ_HBO[:,6],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
 
 plot(lM, l_E_err, yaxis=:log, seriestype = :scatter, label="erreur énergie", xlabel="masse M", ylabel="|E - Eₚ|",size=(400,200))
 plot(lM, l_Ψ_err, yaxis=:log, seriestype = :scatter, label="résidu", xlabel="masse M", ylabel="|Ψ - Ψₚ|",size=(400,200))
 
 
-kato_temple_est = résidus_approx.^2 ./ Kϵ²;
-plot(lM, [l_E_err, kato_temple_est, résidus_pert], xaxis=:log, yaxis=:log, seriestype = :scatter, label=["erreur énergie" "Kato-Temple" "résidu avec Eₚ"], xlabel="masse M", ylabel="|E - Eₚ|",size=(400,200)) 
-
-plot(lM, l_Ψ_err, xaxis=:log, yaxis=:log, seriestype = :scatter, label="erreur vecteur-états à la référence", xlabel="masse M", ylabel="|Ψ - Ψₚ|₂",size=(400,200))
+using CUDA
+using CUDA.CUSPARSE
+using LinearAlgebra
+using SparseArrays
+using IterativeSolvers
+N = 100;
+r_cpu = sprand(N*N,N*N,1/N/N);
+r_gpu = CuSparseMatrixCSC(r_cpu);
+x_cpu = rand(N*N);
+x_gpu = cu(x_cpu);
+@time      d_cpu = cg(r_cpu, x_cpu);
+CUDA.@time d_gpu = cg(r_gpu, x_gpu);
