@@ -28,8 +28,8 @@ end
 #### séparation des deux contributions du laplacien 2D ####
 function laplacian_2D_rescaled_dim_elec(N, N²) # partie du laplacien 2D pour la dimension électronique: manque juste le facteur 1/(m*δr²)
     Λ          = spzeros(N²,N²);
-    diag       = ones(Float64,N);        # termes uniquement sur la diagonale du bloc diagonal coefficientés de 1
-    extra_diag = -.5*ones(Float64,N-1);  # ainsi que sur l'extra diagonale du bloc diagonal coefficientés de -1/2
+    diag       = 2*ones(Float64,N);        # termes uniquement sur la diagonale du bloc diagonal coefficientés de 2
+    extra_diag = -ones(Float64,N-1);  # ainsi que sur l'extra diagonale du bloc diagonal coefficientés de -1
     T          = SymTridiagonal(diag, extra_diag);
     @views for i in 1:N
         Λ[1+(i-1)*N:i*N,1+(i-1)*N:i*N] .= T[:,:]
@@ -39,8 +39,8 @@ end
 
 function laplacian_2D_rescaled_dim_nucl(N, N²) # partie du laplacien 2D pour la dimension nucléaire: manque juste le facteur K*ϵ²/δu²
     Λ = spzeros(N²,N²)
-    T = sparse(I,N,N);       # termes uniquement sur la diagonale du bloc diagonal coefficientés de 1
-    J = -.5*sparse(I,N,N);   # ainsi que sur la diagonale du du bloc extra-diagonal coefficientés de -1/2
+    T = 2*sparse(I,N,N);     # termes uniquement sur la diagonale du bloc diagonal coefficientés de 2
+    J = -sparse(I,N,N);      # ainsi que sur la diagonale du du bloc extra-diagonal coefficientés de -1
     @views for i in 1:N
         Λ[1+(i-1)*N:i*N,1+(i-1)*N:i*N] .= T[:,:]
     end
@@ -86,9 +86,9 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     l_E_true = zeros(l);
     # l_E_diff = zeros(l); # pour vérifier l'approximation E₁-E₀ ≈ ω₀
     l_E_pert = zeros(l);
-    l_Ψ_err  = zeros(l);
+    l_Ψ_L2  = zeros(l);
     l_E_err  = zeros(l);
-    l_Ψ_H1_c = zeros(l);
+    l_Ψ_H1 = zeros(l);
     u_min, u_max, δu, δu², us, ug = get_rescaling(N);
     λ_approx = zeros(l);
     Kϵ²      = zeros(l);
@@ -182,7 +182,7 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         # CONSTRUCTION DU POTENTIEL ET DU HAMILTONIEN NON PERTURBÉS HBO SUR GRILLE
     
         # création du laplacien 2D sur grille qui factorise les deux cas 𝔥₀ et 𝔥
-        Λ𝔥 = K*ϵ²/δu²*Λ2D_nucl + 1/(m*δr²)*Λ2D_elec;
+        Λ𝔥 = K*ϵ²/2/δu²*Λ2D_nucl + 1/(2*m*δr²)*Λ2D_elec;
         
         # OPÉRATEUR RESCALÉ NON PERTURBÉ SUR GRILLE
         𝔥₀ = Λ𝔥 + V̂⁰ug                         # 𝔥 : Ψ(r,u) ∈ L²(ℝ^N^2) ↦ -1/2m × ∂²/∂r² -1/2M × ∂²/∂u² + V(r,u₀) + Kϵ²/2*(∂²E₀/∂u²)(u₀)(u-u₀)² le hamiltonien HBO non perturbé paramétré en u
@@ -312,11 +312,11 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
             l_E_pert[ind_M]   += @views ϵ^q*llE[q];
         end
         
-        Ω_norm_H1 = sparse(I, N², N²) +  1/δu²*Λ2D_nucl + 1/δr²*Λ2D_elec;
+        Ω_norm_H1 = sparse(I, N², N²) +  1/δu²*Λ2D_nucl + 1/δr²*Λ2D_elec; # + car Λ2D_nucl et Λ2D_elec représentent déjà le laplacien
         println("calcul résultats masse ", string(M))
         diff_vectors = l_Ψ_pert[:,ind_M] - l_Ψ_true[:,ind_M];
-        l_Ψ_err[ind_M]  = norm(diff_vectors);
-        l_Ψ_H1_c[ind_M] = dot(diff_vectors, Ω_norm_H1, diff_vectors);
+        l_Ψ_L2[ind_M]  = norm(diff_vectors);
+        l_Ψ_H1[ind_M] = sqrt(dot(diff_vectors, Ω_norm_H1, diff_vectors));
         l_E_err[ind_M]  = abs(l_E_pert[ind_M] - l_E_true[ind_M]);
         # calcul inégalité de Kato-Temple:
         λ_approx[ind_M] = dot(l_Ψ_pert[:,ind_M], 𝔥, l_Ψ_pert[:,ind_M]); # numérateur du quotient de rayleigh
@@ -325,7 +325,7 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         Kϵ²[ind_M]      = K*ϵ²;
         ind_M += 1;
     end
-    return l_Ψ_H1_c, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
+    return l_Ψ_H1, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_L2, l_E_err, # résultats
            N², rs, Rs, rg, Rg, V, LS, Λr, # paramètres
            u_min, u_max, δu, δu², us, ug # rescaling
 end
@@ -335,7 +335,7 @@ end
 me = 1; mp = 500; Qmax=1;
 M=(2*mp^3+mp^2*me)/(2*mp*(me+mp));
 m=(2*mp^2*me)/(mp*(2*mp+me)); 
-r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=300; ω=1.;
+r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=150; ω=1.;
 kdim1d=20; kdim2d = 70;
 β=1.5; η=.5; V0=1.5; σ=1.;
 
@@ -350,7 +350,7 @@ end
 
 
 lM = [100, 150, 250, 500, 700, 1000, 3000, 5000];
-@time l_Ψ_H1_c, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
+@time l_Ψ_H1, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_L2, l_E_err,
             N², rs, Rs, rg, Rg, V, LS, Λr,
             u_min, u_max, δu, δu², us, ug = decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax);
 
@@ -358,17 +358,19 @@ lM = [100, 150, 250, 500, 700, 1000, 3000, 5000];
 
 
 kato_temple_est = résidus_approx.^2 ./ Kϵ²;
-plot(lM, [l_E_err, kato_temple_est, résidus_pert, l_Ψ_err.^2, l_Ψ_H1_c],
+plot(lM, [l_E_err, kato_temple_est, résidus_pert, l_Ψ_L2.^2, l_Ψ_H1.^2],
             xaxis=:log, yaxis=:log, seriestype = :scatter,
             label=["erreur énergie à la référence: |Eₐ-E|" "Kato-Temple quotient Rayleigh: ||hΨₐ-⟨Ψₐ,h,Ψₐ⟩Ψₐ||²/ω₀ (2)" "résidu ||hΨₐ-EₐΨₐ|| (2)" "erreur état à la référence ||Ψₐ-Ψ||² (2)" "erreur état à la référence ||Ψₐ-Ψ||² (H1)"],
             xlabel="masse M", size=(600,400), ylims=(1e-5,1e-1), legend=:bottomleft) 
 
 
+# pour afficher les pentes
 abscisses = log10.(lM[1:6]);
-ord_E = log10.(l_E_err[1:6]);
-ord_H1 = log10.(l_Ψ_H1_c[1:6]);
-ord_L2_2 = l_Ψ_err.^2;
-ord_L2 = log10.(ord_L2_2[1:6]);
+ord_E     = log10.(l_E_err[1:6]);
+ord_H1_c  = l_Ψ_H1.^2;
+ord_H1    = log10.(ord_H1_c[1:6]);
+ord_L2_c  = l_Ψ_L2.^2;
+ord_L2    = log10.(ord_L2_c[1:6]);
 
 @show (ord_H1[6]-ord_H1[1])/(abscisses[6]-abscisses[1]);
 @show (ord_E[6]-ord_E[1])/(abscisses[6]-abscisses[1]);
@@ -380,7 +382,7 @@ heatmap(rs, us, reshape(l_Ψ_true[:,6],N,N)'.^2, xlabel="coordonnée électroniq
 heatmap(rs, us, reshape(l_Ψ_HBO[:,6],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
 
 plot(lM, l_E_err, yaxis=:log, seriestype = :scatter, label="erreur énergie", xlabel="masse M", ylabel="|E - Eₚ|",size=(400,200))
-plot(lM, l_Ψ_err, yaxis=:log, seriestype = :scatter, label="résidu", xlabel="masse M", ylabel="|Ψ - Ψₚ|",size=(400,200))
+plot(lM, l_Ψ_L2, yaxis=:log, seriestype = :scatter, label="résidu", xlabel="masse M", ylabel="|Ψ - Ψₚ|",size=(400,200))
 
 
 using CUDA
