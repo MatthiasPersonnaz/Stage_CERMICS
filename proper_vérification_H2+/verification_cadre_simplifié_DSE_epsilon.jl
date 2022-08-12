@@ -390,10 +390,15 @@ using CUDA.CUSPARSE
 using LinearAlgebra
 using SparseArrays
 using IterativeSolvers
+using KrylovKit
 N = 100;
 r_cpu = sprand(N*N,N*N,1/N/N);
 r_gpu = CuSparseMatrixCSC(r_cpu);
 x_cpu = rand(N*N);
 x_gpu = cu(x_cpu);
+
+@time KrylovKit.eigsolve(r_cpu, N*N, 1, :SR, krylovdim=20);
+CUDA.@time KrylovKit.eigsolve(r_gpu, N*N, 1, :SR, krylovdim=20);
+
 @time      d_cpu = cg(r_cpu, x_cpu);
 CUDA.@time d_gpu = cg(r_gpu, x_gpu);
