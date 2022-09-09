@@ -29,7 +29,7 @@ end
 function laplacian_2D_rescaled_dim_elec(N, N²) # partie du laplacien 2D pour la dimension électronique: manque juste le facteur 1/(m*δr²)
     Λ          = spzeros(N²,N²);
     diag       = 2*ones(Float64,N);        # termes uniquement sur la diagonale du bloc diagonal coefficientés de 2
-    extra_diag = -ones(Float64,N-1);  # ainsi que sur l'extra diagonale du bloc diagonal coefficientés de -1
+    extra_diag = -ones(Float64,N-1);       # ainsi que sur l'extra diagonale du bloc diagonal coefficientés de -1
     T          = SymTridiagonal(diag, extra_diag);
     @views for i in 1:N
         Λ[1+(i-1)*N:i*N,1+(i-1)*N:i*N] .= T[:,:]
@@ -75,7 +75,24 @@ function get_rescaling(N)
 end
 
 
-
+function get_lowest_surface_energy(Λr, δR, R_min, rs, N)
+    # à changer pour faire une dichotomie ou une biblithèque d'optimisation
+    # RECHERCHE DU R₀  minimisant l'énergie de l'état fondamental
+    lE₀ = zeros(N);
+    Base.Threads.@threads for j in 1:N
+        Vx = sparse(Diagonal(Vector(V_nucl_el.(rs,R_min+j*δR)))) # potentiel en x à R=jδR fixé (i.e. à distance noyau-noyau fixé)
+        vals, ~, infos = KrylovKit.eigsolve(Λr+Vx, N, 1, :SR, krylovdim=kdim1d);
+        @assert infos.converged > 0;
+        lE₀[j]     = infos.converged>=1 ? vals[1] + V_nucl_nucl(R_min + j*δR)  : NaN;
+        # on récupère l'énergie  propre du niveau fondamental sur la tranche à R fixé
+    end  
+    # CALCUL DU R₀ ET DES RAIDEURS
+    E₀_at_R₀, ind_R₀ = findmin(lE₀);       # trouver l'énergie de surface minimale
+    R₀               = ind_R₀*δR + R_min;  # définir le paramètre nucléaire minimisant l'énergie de surface
+    K = 1/(δR)^2 * dot([−1/560 8/315 −1/5 8/5 −205/72 8/5 −1/5 8/315 −1/560], view(lE₀, ind_R₀-4:ind_R₀+4));  # on calcule la dérivée seconde  à l'ordre 8 par rapport à y de E₀ en R₀
+    # constante de raideur sur l'axe (Oy) pour le hamiltonien non perturbé
+    return lE₀, E₀_at_R₀, ind_R₀, R₀, K
+end
 
 
 function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax)
@@ -95,9 +112,7 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     résidus_approx  = zeros(l);
     résidus_pert    = zeros(l);
     
-    
-############# ICI COMMENCE LA BOUCLE POUR LA MASSE (ce qui précède ne change pas si M change) #############
-    ind_M = 1;
+############# ICI FIGURENT LES PARAMETRES INCHANGES AVEC LA MASSE #############
     println("calcul paramètres de grille"); flush(stdout)
     δr = (r_max-r_min)/(N-1);
     δR = (R_max-R_min)/(N-1);
@@ -121,43 +136,33 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     # STRUCTURE DU LAPLACIEN 1D
     LS = SymTridiagonal(-2*ones(Float64,N), ones(Float64,N-1)); 
 
-    # LAPLACIENS SUR AXES
+    # LAPLACIENS SUR AXES INDEPENDANTS DE M
     Λr = -1/(δr²*2*m)*LS;  # laplacien sur l'axe r
 
     
-### CALCUL DE L'ÉNERGIE DE SURFACE ###
+    ### CALCUL DE L'ÉNERGIE DE SURFACE ###
     println("calcul de l'énergie de surface et son minimum"); flush(stdout)
-    # à changer pour faire une dichotomie ou une biblithèque d'optimisation
-    # RECHERCHE DU R₀  minimisant l'énergie de l'état fondamental
-    lE₀ = zeros(N);
-    Base.Threads.@threads for j in 1:N
-        Vx = sparse(Diagonal(Vector(V_nucl_el.(rs,R_min+j*δR)))) # potentiel en x à R=jδR fixé (i.e. à distance noyau-noyau fixé)
-        vals, ~, infos = KrylovKit.eigsolve(Λr+Vx, N, 1, :SR, krylovdim=kdim1d);
-        @assert infos.converged > 0;
-        lE₀[j]     = infos.converged>=1 ? vals[1] + V_nucl_nucl(R_min + j*δR)  : NaN;
-        # on récupère l'énergie  propre du niveau fondamental sur la tranche à R fixé
-    end  
-    # CALCUL DU R₀ ET DES RAIDEURS
-    E₀_at_R₀, ind_R₀ = findmin(lE₀);       # trouver l'énergie de surface minimale
-    R₀               = ind_R₀*δR + R_min;  # définir le paramètre nucléaire minimisant l'énergie de surface
-    K = 1/(δR)^2 * dot([−1/560 8/315 −1/5 8/5 −205/72 8/5 −1/5 8/315 −1/560], view(lE₀, ind_R₀-4:ind_R₀+4));  # on calcule la dérivée seconde  à l'ordre 8 par rapport à y de E₀ en R₀
-    # constante de raideur sur l'axe (Oy) pour le hamiltonien non perturbé
+    lE₀, E₀_at_R₀, ind_R₀, R₀, K = get_lowest_surface_energy(Λr, δR, R_min, rs, N);
+    # la constante K ne dépend pas de la masse M
+    
     
     Λ2D_elec = laplacian_2D_rescaled_dim_elec(N,N²);
     Λ2D_nucl = laplacian_2D_rescaled_dim_nucl(N,N²);
 
     
-
-    for M in lM
+############# ICI COMMENCE LA BOUCLE POUR LA MASSE (ce qui précède ne change pas si M change) #############
+    for (ind_M,M) in enumerate(lM)
 
         ### CALCUL DES OPÉRATEURS ###
-
         println("\n## calcul des opérateurs rescalés masse "*string(M)); flush(stdout)
         ϵ = 1/sqrt(sqrt(K*M)); # paramètre de redimensionnement
         ϵ² = ϵ^2;
-    
+
+        # LAPLACIENS SUR AXES
         Λu = -K*ϵ²/δu²*LS;            # laplacien sur l'axe (Ou)
     
+
+
         # FONCTIONS POTENTIELS HBO NON PERTURBÉS SUR AXES SÉPARÉS  
         V₀rs  = V[:,ind_R₀];          # cf formule 3.19 deuxième ligne du rapport sans la constante .- E₀_at_R₀
         V₀us  = .5*K*(ϵ*us).^2        # cf formule 3.23 première ligne du rapport sans la constante .+ E₀_at_R₀
@@ -180,7 +185,6 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         V̂⁰ug = Diagonal(reshape(V₀ug, N²));
     
         # CONSTRUCTION DU POTENTIEL ET DU HAMILTONIEN NON PERTURBÉS HBO SUR GRILLE
-    
         # création du laplacien 2D sur grille qui factorise les deux cas 𝔥₀ et 𝔥
         Λ𝔥 = K*ϵ²/2/δu²*Λ2D_nucl + 1/(2*m*δr²)*Λ2D_elec;
         
@@ -210,9 +214,9 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
             
         Ŵu = Diagonal(reshape(Vp_res,N²)); # opérateur correspondant à la perturbation paramétrée en u
         
-        
-        println("calcul solution_produit par Krylov"); flush(stdout)
+
         ### CALCUL DE LA SOLUTION-PRODUIT HARMONIC-BORN-OPPENHEIMER ###
+        println("calcul solution_produit par Krylov"); flush(stdout)
 
         lE⁰x, lϕ⁰x, infos_x = KrylovKit.eigsolve(𝔥r, N, 1, :SR, krylovdim=kdim1d); 
         @assert infos_x.converged ≥ 1;
@@ -323,7 +327,6 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         résidus_approx[ind_M]  = norm(𝔥*l_Ψ_pert[:,ind_M] - λ_approx[ind_M]*l_Ψ_pert[:,ind_M]);
         résidus_pert[ind_M]    = norm(𝔥*l_Ψ_pert[:,ind_M] - l_E_pert[ind_M]*l_Ψ_pert[:,ind_M]);
         Kϵ²[ind_M]      = K*ϵ²;
-        ind_M += 1;
     end
     return l_Ψ_H1, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_L2, l_E_err, # résultats
            N², rs, Rs, rg, Rg, V, LS, Λr, # paramètres
@@ -360,7 +363,7 @@ lM = [100, 150, 250, 500, 700, 1000, 3000, 5000];
 kato_temple_est = résidus_approx.^2 ./ Kϵ²;
 plot(lM, [l_E_err, kato_temple_est, résidus_pert, l_Ψ_L2.^2, l_Ψ_H1.^2],
             xaxis=:log, yaxis=:log, seriestype = :scatter,
-            label=["erreur énergie à la référence: |Eₐ-E|" "Kato-Temple quotient Rayleigh: ||hΨₐ-⟨Ψₐ,h,Ψₐ⟩Ψₐ||²/ω₀ (2)" "résidu ||hΨₐ-EₐΨₐ|| (2)" "erreur état à la référence ||Ψₐ-Ψ||² (2)" "erreur état à la référence ||Ψₐ-Ψ||² (H1)"],
+            label=["erreur énergie à la référence: |Eₐ-E|" "Kato-Temple quotient Rayleigh: ||hΨₐ-⟨Ψₐ,h,Ψₐ⟩Ψₐ||²/ω₀ (norme 2)" "résidu ||hΨₐ-EₐΨₐ|| (norme 2)" "erreur état à la référence ||Ψₐ-Ψ||² (norme 2)" "erreur état à la référence ||Ψₐ-Ψ||² (norme H1)"],
             xlabel="masse M", size=(600,400), ylims=(1e-5,1e-1), legend=:bottomleft) 
 
 

@@ -57,32 +57,6 @@ end
 
 
 
-#### séparation des deux contributions du laplacien 2D ####
-function laplacian_2D_rescaled_dim_elec(N, N²) # partie du laplacien 2D pour la dimension électronique: manque juste le facteur 1/(m*δr²)
-    Λ          = spzeros(N²,N²);
-    diag       = ones(Float64,N);                   # termes uniquement sur la diagonale du bloc diagonal coefficientés de 1
-    extra_diag = -.5*ones(Float64,N-1);             # ainsi que sur l'extra diagonale du bloc diagonal coefficientés de -1/2
-    T          = SymTridiagonal(diag, extra_diag);
-    @views for i in 1:N
-        Λ[1+(i-1)*N:i*N,1+(i-1)*N:i*N] .= T[:,:]
-    end
-    return Λ
-end
-
-function laplacian_2D_rescaled_dim_nucl(N, N²) # partie du laplacien 2D pour la dimension nucléaire: manque juste le facteur K*ϵ²/δu²
-    Λ = spzeros(N²,N²)
-    T = sparse(I,N,N);       # termes uniquement sur la diagonale du bloc diagonal coefficientés de 1
-    J = -.5*sparse(I,N,N);   # ainsi que sur la diagonale du du bloc extra-diagonal coefficientés de -1/2
-    @views for i in 1:N
-        Λ[1+(i-1)*N:i*N,1+(i-1)*N:i*N] .= T[:,:]
-    end
-    @views for i in 1:N-1
-        Λ[1+(i-1)* N : i    *N, 1+(i)  *N :  (i+1)*N] .= J[:,:]
-        Λ[1+(i)  * N : (i+1)*N, 1+(i-1)*N :      i*N] .= J[:,:]
-    end
-    return Λ
-end
-#############################################################
 
 function hamiltonian_2D_rescaled(δr, δr², δu, δu², N, N², V, m, ϵ², K)
     println("hamiltonian_2D_rescaled"); flush(stdout)
@@ -107,34 +81,6 @@ H = [SpecialPolynomials.basis(Hermite, i)(x) for i in 0:3] # /!\ au décalage d'
 ϕ1Dk = (n,x,m,k) -> (k*m)^(.125)*2^(-n/2)*1/sqrt(factorial(n))*π^(-1/4)*H[n+1]((k*m)^(.25)*x)*exp(-sqrt(k*m)/2*x^2);
 ϕ1Du = (n,u,m,k) -> (k*m)^(.125)*2^(-n/2)*1/sqrt(factorial(n))*π^(-1/4)*H[n+1](u)*exp(-1/2*u^2); # u tel que r = ϵu
 
-
-function get_parameters(r_min, r_max, R_min, R_max, N, m, M)
-    println("GET_PARAMETERS"); flush(stdout)
-    δr = (r_max-r_min)/(N-1);
-    δR = (R_max-R_min)/(N-1);
-    δr² = δr*δr;
-    δR² = δR*δR;
-    N² = N^2;
-
-    # CONSTRUCTION DE LA MESHGRID
-    rs = Vector(r_min:δr:r_max); # sur l'axe donne r ↦ r en direction coordonnée électron
-    Rs = Vector(R_min:δR:R_max); # sur l'axe donne R ↦ R en direction coordonnée distance noyau-noyau
-    rg = ones(N)' .* rs;         # sur la grille donne   (r,R) ↦ r
-    Rg = Rs' .* ones(N);         # sur la grille donne   (r,R) ↦ R
-    V = zeros(N,N);              # sur la grille donnera (r,R) ↦ V(r,R) après évaluation ci-dessous
-
-    # CONSTRUCTION DU POTENTIEL ORIGINAL ET DU HAMILTONIEN SUR GRILLE paramétré en R
-    V = @. V_nucl_el(rg, Rg) + V_nucl_nucl(Rg); # potentiel d'interaction sur la grille tous phénomènes compris
-    Ĥ, Λ, V̂ = hamiltonian_2D(δr, δr², δR, δR², N, N², V, m, M);
-
-    # STRUCTURE DU LAPLACIEN 1D
-    LS = SymTridiagonal(-2*ones(Float64,N), ones(Float64,N-1)); 
-
-    # LAPLACIENS SUR AXES
-    Λr = -1/(δr²*2*m)*LS;  # laplacien sur l'axe r
-    ΛR = -1/(δR²*2*M)*LS;  # laplacien sur l'axe R
-    return δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR
-end
 
 
 function get_lowest_surface_energy(Λr, δR, R_min, rs, N)
@@ -172,78 +118,6 @@ end
 
 function get_parameters_rescaled(u_min, u_max, δu, δu², us, ug, K, M, N, N², LS, V, Rs, rs, rg, Rg, δR, δr, δR², δr², Λ, Λr, ΛR, ind_R₀, R₀)
     println("get_parameters_rescaled"); flush(stdout)
-    ϵ = 1/sqrt(sqrt(K*M)); # paramètre de redimensionnement
-    ϵ² = ϵ^2;
-
-    Λu = -K*ϵ²/δu²*LS;            # laplacien sur l'axe (Ou)
-
-    # FONCTIONS POTENTIELS HBO NON PERTURBÉS SUR AXES SÉPARÉS  
-    V₀rs  = V[:,ind_R₀];          # cf formule 3.19 deuxième ligne du rapport sans la constante .- E₀_at_R₀
-    V₀Rs  = .5*K*(Rs.-R₀).^2;     # cf formule 3.19 première ligne du rapport sans la constante .+ E₀_at_R₀
-    V₀us  = .5*K*(ϵ*us).^2        # cf formule 3.23 première ligne du rapport sans la constante .+ E₀_at_R₀
-
-    # OPÉRATEURS POTENTIELS HBO NON PERTURBÉS SUR AXES SÉPARÉS 
-    V̂⁰rs  = Diagonal(V₀rs);
-    V̂⁰Rs  = Diagonal(V₀rs);
-    V̂⁰us  = Diagonal(V₀us);
-
-    # HAMILTONIENS NON PERTURBÉS SUR AXES SÉPARÉS
-    Ĥ⁰r  = Λr + V̂⁰rs;
-    Ĥ⁰R  = ΛR + V̂⁰Rs;
-
-    # OPÉRATEURS RESCALED SUR GRILLE
-    V_res = @. V_nucl_el(rg, R₀.+ϵ*ug) + V_nucl_nucl(R₀.+ϵ*ug); # (r,u) ↦ V(r,u) 
-
-    # FONCTION POTENTIEL HBO NON PERTURBÉ SUR GRILLE
-    # formule 3.19: somme des deux premières lignes en potentiel:
-    # que deux car seulement deux paramétrages (R et u)
-    V₀Rg = @. V[:,ind_R₀]*ones(N)'  + .5*K*(Rg.-R₀).^2; # (r,R) ↦ V(r,R₀) + 1/2*(∂²E₀/∂R²)(R₀)(R-R₀)²
-    V₀ug = @. V_nucl_el(rg, R₀) + V_nucl_nucl(R₀)  + .5*K*ϵ²*ug.^2;   # (r,u) ↦ V(r,u₀) + Kϵ²/2*(∂²E₀/∂u²)(u₀)(u-u₀)²
-
-    # OPÉRATEUR POTENTIEL NON PERTURBÉ SUR GRILLE
-    V̂⁰Rg = Diagonal(reshape(V₀Rg, N²));
-    V̂⁰ug = Diagonal(reshape(V₀ug, N²));
-
-    # CONSTRUCTION DU POTENTIEL ET DU HAMILTONIEN NON PERTURBÉS HBO SUR GRILLE
-    Ĥ⁰ = Λ + V̂⁰Rg; # hamiltonien HBO non perturbé paramétré en R
-
-    # création du laplacien 2D sur grille qui factorise les deux cas 𝔥₀ et 𝔥
-    # à compléter
-    # Λ𝔥 = 
-
-    𝔥₀,~,~  = hamiltonian_2D_rescaled(δr, δr², δu, δu², N, N², V₀ug, m, ϵ², K); # hamiltonien HBO non perturbé paramétré en u
-
-    # pour + tard: symétriser un peu la construction de ces variables
-
-    # OPÉRATEUR RESCALÉ ORIGINAL SUR GRILLE
-    𝔥,~,~  = hamiltonian_2D_rescaled(δr, δr², δu, δu², N, N², V_res, m, ϵ², K) # 𝔥 : Ψ(r,u) ∈ L²(ℝ^N^2) ↦ -1/2m × ∂²/∂r² -1/2M × ∂²/∂u² + V(r,u) le hamiltonien original complet
-
-    # FONCTION PERTURBATION Vp (développement de Taylor de la perturbation)
-    # ordre 1 en espace: (∂V/∂R)(r,R₀)×(R-R₀)
-    ∂R_of_V_at_rR₀   = 1/δR*  V[:,ind_R₀-4:ind_R₀+4] * [1/280 −4/105 1/5 −4/5 0. 4/5 −1/5 4/105 −1/280]';       # vecteur, donne r      ↦ ∂V/∂R(r,R₀)
-    V₁               = ∂R_of_V_at_rR₀*ones(N)' .* (Rg.-R₀);                                                     # matrice, donne (r, R) ↦ ∂V/∂R(r,R₀)
-
-    # ordre 2 en espace: 1/2×[(∂²V/∂R²)(r,R₀) - d²E₀/dR²(R₀)](R-R₀)² 
-    ∂²RR_of_V_at_rR₀ = 1/δR²* V[:,ind_R₀-4:ind_R₀+4] * [−1/560 8/315 −1/5 8/5 −205/72 8/5 −1/5 8/315 −1/560]';  # vecteur, donne r      ↦ ∂²V/∂R²(r,R₀)
-    V₂               = .5*(∂²RR_of_V_at_rR₀*ones(N)' .- K) .* (Rg.-R₀).^2;                                      # matrice, donne (r, R) ↦ ∂V/∂R(r,R₀)
-
-    # perturbation totale ordre 1 + ordre 2 en espace (troncature à automatiser éventuellement à tout ordre)
-    Vp = V₁ + V₂;
-
-    # OPÉRATEUR PERTURBATION paramétré en R
-    Ŵ  = Diagonal(reshape(Vp, N²)); # ψ∈L²(ℝ^N²) ↦ Vp×ψ
-
-    # OPÉRATEURS HAMILTONIENS NON PERTURBÉS RESCALÉS SUR AXES SÉPARÉS
-    𝔥u =   K*ϵ²*(-1/2/δu²*LS + 1/2*Diagonal(us.^2));  # 𝔥u : ψ(u) ∈ L²(ℝ^N) ↦ 1/2 × Kϵ²(-∂²/∂u² + u²)ψ pour la solution-produit tensoriel
-    # 𝔥u = Λu + V̂⁰us;
-    𝔥r = Λr + V̂⁰rs;                                   # 𝔥r : ψ(r) ∈ L²(ℝ^N) ↦ 1/2 ×    (-∂²/∂r² + R²)ψ pour la solution-produit tensoriel
-
-    𝔴  =  @.  V_nucl_el(rg, R₀.+ϵ*ug) + V_nucl_nucl(R₀)  - V_nucl_el(rg, R₀) - V_nucl_nucl(R₀+ϵ*ug) +  1/2*ϵ²*K*ug.^2 # (r,u) ↦ V(r,R₀) - V(r,R₀+ϵu) + Kϵ²/2*u²  (éq. 3.23 du rapport)
-    𝔴₁ = ϵ*∂R_of_V_at_rR₀.*ug;
-    𝔴₂ = .5*ϵ^2*(∂²RR_of_V_at_rR₀*ones(N)' .- K) .*ug.^2;
-    Vp_res = 𝔴₁ + 𝔴₂;
-        
-    Ŵu = Diagonal(reshape(Vp_res,N²)); # opérateur correspondant à la perturbation paramétrée en u
     return ϵ, ϵ², Λu, V₀rs, V₀rs, V₀us, Ĥ⁰r, Ĥ⁰R, V_res, V₀Rg, V₀ug, V̂⁰Rg, V̂⁰ug, Ĥ⁰, V₁, V₂, Vp, Vp_res, Ŵ, 𝔥, 𝔥u, 𝔥r, 𝔴, Ŵu, 𝔥₀
 end
 
@@ -263,21 +137,130 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     Kϵ²      = zeros(l);
     résidus_approx  = zeros(l);
     résidus_pert    = zeros(l);
+    lK              = zeros(l);
+############# ICI FIGURENT LES PARAMETRES INCHANGES AVEC LA MASSE #############
+    println("calcul paramètres de grille"); flush(stdout)
+    δr = (r_max-r_min)/(N-1);
+    δR = (R_max-R_min)/(N-1);
+    δr² = δr*δr;
+    δR² = δR*δR;
+    N² = N^2;
+
+    # CONSTRUCTION DE LA MESHGRID
+    rs = Vector(r_min:δr:r_max); # sur l'axe donne r ↦ r en direction coordonnée électron
+    Rs = Vector(R_min:δR:R_max); # sur l'axe donne R ↦ R en direction coordonnée distance noyau-noyau
+    rg = ones(N)' .* rs;         # sur la grille donne   (r,R) ↦ r
+    Rg = Rs' .* ones(N);         # sur la grille donne   (r,R) ↦ R
+    V = zeros(N,N);              # sur la grille donnera (r,R) ↦ V(r,R) après évaluation ci-dessous
     
+    # vérifier si les maths en virgule flottante sont correctes: https://0.30000000000000004.com/
+    @assert length(rs) == length(Rs) == length(us) == N;
+    
+    # CONSTRUCTION DU POTENTIEL ORIGINAL ET DU HAMILTONIEN SUR GRILLE paramétré en R
+    V[:,:] = @. V_nucl_el(rg, Rg) + V_nucl_nucl(Rg); # potentiel d'interaction sur la grille tous phénomènes compris
+    
+    # STRUCTURE DU LAPLACIEN 1D
+    LS = SymTridiagonal(-2*ones(Float64,N), ones(Float64,N-1)); 
+    
+    # LAPLACIENS SUR AXES INDEPENDANTS DE M
+    Λr = -1/(δr²*2*m)*LS;  # laplacien sur l'axe r
 
-    ############# ICI COMMENCE LA BOUCLE POUR LA MASSE (ce qui précède ne change pas si M change) #############
-    ind_M = 1;
+    ### CALCUL DE L'ÉNERGIE DE SURFACE ###
+    println("calcul de l'énergie de surface et son minimum"); flush(stdout)
+    lE₀, E₀_at_R₀, ind_R₀, R₀, K = get_lowest_surface_energy(Λr, δR, R_min, rs, N); # la constante K ne dépend pas de la masse M
+    # la constante K ne dépend pas de la masse M     
 
-    for M in lM
-        ### CALCUL DE L'ÉNERGIE DE SURFACE ###
-        δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR = get_parameters(r_min, r_max, R_min, R_max, N,  m, M);
-        lE₀, E₀_at_R₀, ind_R₀, R₀, K = get_lowest_surface_energy(Λr, δR, R_min, rs, N); # la constante K ne dépend pas de la masse M
+
+    # Λ2D_elec = 
+    # Λ2D_nucl = 
+
+
+############# ICI COMMENCE LA BOUCLE POUR LA MASSE (ce qui précède ne change pas si M change) #############
+    for (ind_M, M) in enumerate(lM)
         
         ### CALCUL DES OPÉRATEURS ###
-        ϵ, ϵ², Λu, V₀rs, V₀rs, V₀us, Ĥ⁰r, Ĥ⁰R, V_res, V₀Rg, V₀ug, V̂⁰Rg, V̂⁰ug, Ĥ⁰, V₁, V₂, Vp, Vp_res, Ŵ, 𝔥, 𝔥u, 𝔥r, 𝔴, Ŵu, 𝔥₀ = get_parameters_rescaled(u_min, u_max, δu, δu², us, ug, K, M, N, N², LS, V, Rs, rs, rg, Rg, δR, δr, δR², δr², Λ, Λr, ΛR, ind_R₀, R₀);
+        println("\n## calcul des opérateurs rescalés masse "*string(M)); flush(stdout)
+        ϵ = 1/sqrt(sqrt(K*M)); # paramètre de redimensionnement
+        ϵ² = ϵ^2;
 
+        # LAPLACIENS SUR AXES DEPENDANT DE M
+        ΛR = -1/(δR²*2*M)*LS;  # laplacien sur l'axe R
+        Λu = -K*ϵ²/δu²*LS;     # laplacien sur l'axe u
+
+        Ĥ, Λ, V̂ = hamiltonian_2D(δr, δr², δR, δR², N, N², V, m, M);
+    
+        # FONCTIONS POTENTIELS HBO NON PERTURBÉS SUR AXES SÉPARÉS  
+        V₀rs  = V[:,ind_R₀];          # cf formule 3.19 deuxième ligne du rapport sans la constante .- E₀_at_R₀
+        V₀Rs  = .5*K*(Rs.-R₀).^2;     # cf formule 3.19 première ligne du rapport sans la constante .+ E₀_at_R₀
+        V₀us  = .5*K*(ϵ*us).^2        # cf formule 3.23 première ligne du rapport sans la constante .+ E₀_at_R₀
+    
+        # OPÉRATEURS POTENTIELS HBO NON PERTURBÉS SUR AXES SÉPARÉS 
+        V̂⁰rs  = Diagonal(V₀rs);
+        V̂⁰Rs  = Diagonal(V₀rs);
+        V̂⁰us  = Diagonal(V₀us);
+    
+        # HAMILTONIENS NON PERTURBÉS SUR AXES SÉPARÉS
+        Ĥ⁰r  = Λr + V̂⁰rs;
+        Ĥ⁰R  = ΛR + V̂⁰Rs;
+    
+        # OPÉRATEURS RESCALED SUR GRILLE
+        V_res = @. V_nucl_el(rg, R₀.+ϵ*ug) + V_nucl_nucl(R₀.+ϵ*ug); # (r,u) ↦ V(r,u) 
+    
+        # FONCTION POTENTIEL HBO NON PERTURBÉ SUR GRILLE
+        # formule 3.19: somme des deux premières lignes en potentiel:
+        # que deux car seulement deux paramétrages (R et u)
+        V₀Rg = @. V[:,ind_R₀]*ones(N)'  + .5*K*(Rg.-R₀).^2; # (r,R) ↦ V(r,R₀) + 1/2*(∂²E₀/∂R²)(R₀)(R-R₀)²
+        V₀ug = @. V_nucl_el(rg, R₀) + V_nucl_nucl(R₀)  + .5*K*ϵ²*ug.^2;   # (r,u) ↦ V(r,u₀) + Kϵ²/2*(∂²E₀/∂u²)(u₀)(u-u₀)²
+    
+        # OPÉRATEUR POTENTIEL NON PERTURBÉ SUR GRILLE
+        V̂⁰Rg = Diagonal(reshape(V₀Rg, N²));
+        V̂⁰ug = Diagonal(reshape(V₀ug, N²));
+    
+        # CONSTRUCTION DU POTENTIEL ET DU HAMILTONIEN NON PERTURBÉS HBO SUR GRILLE
+        Ĥ⁰ = Λ + V̂⁰Rg; # hamiltonien HBO non perturbé paramétré en R
+        𝔥₀,~,~  = hamiltonian_2D_rescaled(δr, δr², δu, δu², N, N², V₀ug, m, ϵ², K); # hamiltonien HBO non perturbé paramétré en u
+    
+        # pour + tard: symétriser un peu la construction de ces variables
+    
+        # OPÉRATEUR RESCALÉ ORIGINAL SUR GRILLE
+        𝔥,~,~  = hamiltonian_2D_rescaled(δr, δr², δu, δu², N, N², V_res, m, ϵ², K) # 𝔥 : Ψ(r,u) ∈ L²(ℝ^N^2) ↦ -1/2m × ∂²/∂r² -1/2M × ∂²/∂u² + V(r,u) le hamiltonien original complet
+    
+
+
+
+        
+        println("perturbations"); flush(stdout)
+        # FONCTION PERTURBATION Vp (développement de Taylor de la perturbation)
+        # ordre 1 en espace: (∂V/∂R)(r,R₀)×(R-R₀)
+        ∂R_of_V_at_rR₀   = 1/δR*  V[:,ind_R₀-4:ind_R₀+4] * [1/280 −4/105 1/5 −4/5 0. 4/5 −1/5 4/105 −1/280]';       # vecteur, donne r      ↦ ∂V/∂R(r,R₀)
+        V₁               = ∂R_of_V_at_rR₀*ones(N)' .* (Rg.-R₀);                                                     # matrice, donne (r, R) ↦ ∂V/∂R(r,R₀)
+    
+        # ordre 2 en espace: 1/2×[(∂²V/∂R²)(r,R₀) - d²E₀/dR²(R₀)](R-R₀)² 
+        ∂²RR_of_V_at_rR₀ = 1/δR²* V[:,ind_R₀-4:ind_R₀+4] * [−1/560 8/315 −1/5 8/5 −205/72 8/5 −1/5 8/315 −1/560]';  # vecteur, donne r      ↦ ∂²V/∂R²(r,R₀)
+        V₂               = .5*(∂²RR_of_V_at_rR₀*ones(N)' .- K) .* (Rg.-R₀).^2;                                      # matrice, donne (r, R) ↦ ∂V/∂R(r,R₀)
+    
+        # perturbation totale ordre 1 + ordre 2 en espace (troncature à automatiser éventuellement à tout ordre)
+        Vp = V₁ + V₂;
+    
+        # OPÉRATEUR PERTURBATION paramétré en R
+        Ŵ  = Diagonal(reshape(Vp, N²)); # ψ∈L²(ℝ^N²) ↦ Vp×ψ
+    
+        # OPÉRATEURS HAMILTONIENS NON PERTURBÉS RESCALÉS SUR AXES SÉPARÉS
+        𝔥u =   K*ϵ²*(-1/2/δu²*LS + 1/2*Diagonal(us.^2));  # 𝔥u : ψ(u) ∈ L²(ℝ^N) ↦ 1/2 × Kϵ²(-∂²/∂u² + u²)ψ pour la solution-produit tensoriel
+        # 𝔥u = Λu + V̂⁰us;
+        𝔥r = Λr + V̂⁰rs;                                   # 𝔥r : ψ(r) ∈ L²(ℝ^N) ↦ 1/2 ×    (-∂²/∂r² + R²)ψ pour la solution-produit tensoriel
+    
+        𝔴  =  @.  V_nucl_el(rg, R₀.+ϵ*ug) + V_nucl_nucl(R₀)  - V_nucl_el(rg, R₀) - V_nucl_nucl(R₀+ϵ*ug) +  1/2*ϵ²*K*ug.^2 # (r,u) ↦ V(r,R₀) - V(r,R₀+ϵu) + Kϵ²/2*u²  (éq. 3.23 du rapport)
+        𝔴₁ = ϵ*∂R_of_V_at_rR₀.*ug;
+        𝔴₂ = .5*ϵ^2*(∂²RR_of_V_at_rR₀*ones(N)' .- K) .*ug.^2;
+        Vp_res = 𝔴₁ + 𝔴₂; # perturbation totale ordre 1 + ordre 2 en espace (troncature à automatiser éventuellement à tout ordre)
+            
+        Ŵu = Diagonal(reshape(Vp_res,N²)); # opérateur correspondant à la perturbation paramétrée en u
+    
 
         ### CALCUL DE LA SOLUTION-PRODUIT HARMONIC-BORN-OPPENHEIMER ###
+        println("calcul solution_produit par Krylov"); flush(stdout)
+
         lE⁰x, lϕ⁰x, infos_x = KrylovKit.eigsolve(Ĥ⁰r, N, 1, :SR, krylovdim=10); # ou bien avec 𝔥r, car Ĥ⁰r = 𝔥r
         @assert infos_x.converged ≥ 1;
         
@@ -295,14 +278,15 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         l_Ψ_HBO[:,ind_M]  = ΨHBO;
         l_E_pert[ind_M]   = EHBO;
 
-
+        println("calcul solution_référence par Krylov"); flush(stdout)
         ### CALCUL DE LA SOLUTION 2D POUR RÉFÉRENCE DU HAMILTONIEN D'INTÉRÊT PARAMÉTRÉ EN u ###
         lE, lϕ, info_2d = KrylovKit.eigsolve(𝔥, N², 1, :SR, krylovdim=40); # KrylovKit.eigsolve plus rapide que Arpack.eigs globalement
         @assert info_2d.converged ≥ 1;
 
-
+        println("## théorie des perturbations"); flush(stdout)
         l_Ψ_true[:,ind_M] = lϕ[1];
         l_E_true[ind_M] = lE[1];
+
         ### CALCUL DES PERTURBATIONS ###
         Ψ₀ = copy(ΨHBO);
         W =  copy(Ŵu); # W: sparse
@@ -377,9 +361,9 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         résidus_approx[ind_M]  = norm(𝔥*l_Ψ_pert[:,ind_M] - λ_approx[ind_M]*l_Ψ_pert[:,ind_M]);
         résidus_pert[ind_M]    = norm(𝔥*l_Ψ_pert[:,ind_M] - l_E_pert[ind_M]*l_Ψ_pert[:,ind_M]);
         Kϵ²[ind_M]      = K*ϵ²;
-        ind_M += 1;
+        lK[ind_M] = K;
     end
-    return λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
+    return lK, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err, # résultats
            #δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR, # paramètres
            u_min, u_max, δu, δu², us, ug # rescaling
 end
@@ -389,7 +373,7 @@ end
 me = 1; mp = 500; Qmax=2;
 M=(2*mp^3+mp^2*me)/(2*mp*(me+mp));
 m=(2*mp^2*me)/(mp*(2*mp+me)); 
-r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=100; ω=1.; kdim=30; # augmenter la dimension Krylov quand N est grand: pour N=200, prendre kdim=50
+r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=80; ω=1.; kdim=30; # augmenter la dimension Krylov quand N est grand: pour N=200, prendre kdim=50
 β=1.5; η=.5; V0=1.5; σ=1.;
 
 
@@ -402,9 +386,9 @@ function V_nucl_nucl(R)
 end
 
 
-lM = [20, 100, 500, 1000, 2000, 3000, 4000, 5000, 6000, 7000];
+lM = [20, 100, 500, 1000];
 
-@time λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
+@time lK, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_err, l_E_err,
             #δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, Ĥ, Λ, V̂, LS, Λr, ΛR,
             u_min, u_max, δu, δu², us, ug = decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim, Qmax);
 

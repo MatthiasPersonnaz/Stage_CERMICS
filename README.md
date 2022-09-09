@@ -18,3 +18,18 @@ Dépôt GitHub pour les codes implémentant la théorie des perturbations avec l
 
 
 
+déplacer les tests Cholesky de `démo_th_pert_osc_harm_2D_tests_ortho.ipynb` vers le notebook de benchmarking et réévaluer les tests
+
+
+traquer les fautes: faire une liste
+
+
+
+Transférer le arpack de prototype dans benchmark
+
+
+Transférer  les tests de fill matrice etc de prototype dans les benchmark
+
+
+transférer la comparaison avec arpack de dual dans benchmark
+
