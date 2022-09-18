@@ -98,7 +98,8 @@ function get_params_grille(r_max, r_min, R_max, R_min, N)
 end
 
 
-function get_lowest_surface_energy(Λr, δR, R_min, rs, Rs, N, kdim1d)
+function get_lowest_surface_energy_breadth_first(Λr, δR, R_min, rs, Rs, N, kdim1d)
+    println("calcul du minimum de l'énergie de surface par sondage"); flush(stdout)
     # à changer pour faire une dichotomie ou une biblithèque d'optimisation
     # RECHERCHE DU R₀  minimisant l'énergie de l'état fondamental
     lE₀ = zeros(N);
@@ -122,13 +123,15 @@ function get_lowest_surface_energy(Λr, δR, R_min, rs, Rs, N, kdim1d)
 end
 
 
-function get_lowest_surface_energy_secant(Λr, δR, R_min, rs, N, R_rp, R_lp, ϵ, kdim1d)
-    dE_rp = ϵ+1;
+function get_lowest_surface_energy_secant(Λr, δR, R_min, rs, N, R_rp, R_lp, ϵ, kdim1d, itermax)
+    println("calcul du minimum de l'énergie de surface par l'algorithme des sécantes"); flush(stdout)
     Hr = copy(Λr);
     ∂Hr = Diagonal(zeros(N));
     # à l'avenir transformer le ∂Hr en un simple vecteur, le type sert ici uniquement à l'analogie avec l'objet mathématique
-    iter_ctrl = 0
-    while dE_rp > ϵ && iter_ctrl < 100
+    iter_nb = 0;
+    dE_rp = ϵ+1; # initialisation pour rentrer dans la boucle
+
+    while (iter_nb < itermax && abs(dE_rp) > ϵ)
         # calcul des états
         Hr[diagind(Hr)] = diag(Λr) + Vector(V_nucl_el.(rs, R_rp)) .+ V_nucl_nucl(R_rp);
         vals, vecs, infos = KrylovKit.eigsolve(Hr, N, 1, :SR, krylovdim=kdim1d, issymmetric=true, ishermitian=true);
@@ -140,26 +143,67 @@ function get_lowest_surface_energy_secant(Λr, δR, R_min, rs, N, R_rp, R_lp, ϵ
         @assert infos.converged > 0;
         ψ_lp = Vector(vecs[1]);
 
-
         # calcul des dérivées
         ∂Hr[diagind(∂Hr)] = ∂R_V_nucl_el.(rs, R_rp) .+ ∂V_nucl_nucl(R_rp); # 1/2*(∂V_noy_el.(rs.+R_rp/2)-∂V_noy_el.(rs.-R_rp/2));
         dE_rp = dot(ψ_rp,∂Hr,ψ_rp); 
+        
 
         ∂Hr[diagind(∂Hr)] = ∂R_V_nucl_el.(rs, R_lp) .+ ∂V_nucl_nucl(R_lp);
         dE_lp = dot(ψ_lp,∂Hr,ψ_lp);
 
         # méthode des sécantes pour la dérivée de l'énergie par rapport à R
         R_rp_mem = R_rp;
-        R_rp = R_rp - dE_rp*(R_rp-R_lp)/(dE_rp-dE_lp);
+        step = dE_rp*(R_rp-R_lp)/(dE_rp-dE_lp);
+        R_rp -= step;
         R_lp = R_rp_mem;
-        iter_ctrl = iter_ctrl + 1;
+        iter_nb += 1;
+
+        @show iter_nb, step, dE_rp;
     end
-    return R_rp
+    return R_rp, iter_nb
 end
 
 
 
-function test_debug_secant(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax)
+
+function approximation_dérivées_ehrenfest(∂lE₀, N, Λr, rs, Rs, kdim1d, skip, δR)
+    println("approximation des dérivées avec Ehrenfest"); flush(stdout)
+    # code pour les dérivées avec Ehrenfest: plot les erreurs
+    d∂E_fin_diff = zeros(N-2*skip);
+    for ind_t in (skip+1):(N-skip)
+        R_t = Rs[ind_t]
+        Hr = copy(Λr);
+        Hr[diagind(Hr)] = diag(Λr) + Vector(V_nucl_el.(rs, R_t) .+ V_nucl_nucl(R_t)); 
+        vals, vecs, infos = KrylovKit.eigsolve(Hr, N, 1, :SR, krylovdim=kdim1d, issymmetric=true, ishermitian=true);
+        @assert infos.converged ≥ 1;
+        ψ_t = Vector(vecs[1]);
+
+        # plot(rs, ψ_t, title="ψ_t")
+
+        ∂Hr = Diagonal(zeros(N));
+        ∂Hr[diagind(∂Hr)] = ∂R_V_nucl_el.(rs, R_t) .+ ∂V_nucl_nucl(R_t)
+        # plot(rs, diag(∂Hr), title="diag(∂Hr)")
+
+        dE_t_ehr = dot(ψ_t,∂Hr,ψ_t) # Ehrenfest
+        dE_t_fdi = ∂lE₀[ind_t+4]  # finite differences
+        d∂E_fin_diff[ind_t-skip] = abs(dE_t_ehr-dE_t_fdi)
+    end
+    plot(Rs[skip+1:N-skip], d∂E_fin_diff, yaxis=:log, xlabel="R", ylabel="erreur absolue", minorticks=1,
+    title="Approximation de ∂E₀/∂R: Différence entre\ndifférences finies centrées d'ordre 8 et théorème d'Ehrenfest)\nδR≈$(round(δR,digits=4))",
+    label="⟨ψ(R)|dH/dR(R)|ψ(R)⟩- ∫E(R)⋅K₈", legend=true, titlefontsize=11,
+    ylims=(1e-14,1e-8))
+    savefig("./erreur_dérivée.pdf")
+    return d∂E_fin_diff
+end
+
+
+
+
+
+
+
+
+function test_debug_secant(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax, α)
     u_min, u_max, δu, δu², us, ug = get_rescaling(N);
     δr, δR, δr², δR², N², rs, Rs, rg, Rg, V = get_params_grille(r_max, r_min, R_max, R_min, N);
 
@@ -182,9 +226,9 @@ function test_debug_secant(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d,
     Λr = -1/(δr²*2*m)*LS;  # laplacien sur l'axe r
 
     
-    ### CALCUL DE L'ÉNERGIE DE SURFACE ###
+    ### CALCUL DE L'ÉNERGIE DE SURFACE PAR PARCOURS EN LARGEUR ###
     println("calcul de l'énergie de surface et son minimum"); flush(stdout)
-    lE₀, E₀_at_R₀, ind_R₀, R₀, K = get_lowest_surface_energy(Λr, δR, R_min, rs, Rs, N, kdim1d);
+    lE₀, E₀_at_R₀, ind_R₀, R₀, K = get_lowest_surface_energy_breadth_first(Λr, δR, R_min, rs, Rs, N, kdim1d);
     # la constante K ne dépend pas de la masse M
     
     diff1_ctr_o4 = [+1/12, −2/3,  0.,  2/3, −1/12];
@@ -194,79 +238,54 @@ function test_debug_secant(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d,
     ker_s = length(diff1_ctr_o8);
     skip = div(ker_s,2);
 
-    # plot de l'énergie et de sa dérivée avec les différences finies
-    plot(Rs, lE₀, xlabel="R", label="E₀(R)", legend=true)
-    plot!(Rs[skip+1:N-skip], ∂lE₀[ker_s:N], xlabel="R", label="∂E₀(R) par différences finies centrées o8",
-    legend=true, title="Énergie fondamentale du hamiltonien\nélectronique selon R et sa dérivée",
-    titlefontsize=11)
 
-    # plot de sa dérivée avec la méthode fréquentielle
-    lR = R_max-R_min;
+    
+
+    # plot de la dérivée de l'énergie avec la méthode fréquentielle
     # y = [sin(2*x)+cos(5*x) for x in Rs]
     # dydx = [2*cos(2*x)-5*sin(5*x) for x in Rs]
     k = fftfreq(N, 1/δR); # cf doc fs est l'inverse de l'espacement des échantillons
-    lE₀_fft = real(ifft(2*π*1im*k.*fft(lE₀.*DSP.Windows.hanning(N))));
-    plot!(Rs,lE₀_fft, label="∂E₀(R) par FFT fenêtrée Hanning")
+    lE₀_fft = real(ifft(2*π*1im*k.*fft(lE₀.*DSP.Windows.tukey(N, α; padding=0, zerophase=false)))); # .*DSP.Windows.hanning(N)
+    plot(Rs,lE₀_fft, label="∂E₀(R) par FFT fenêtrée Tukey($α)", ylims=(-2.4,1.0), linestyle=:solid, color="red")
     # plot!(Rs, dydx)
+
+    # plot de la dérivée de l'énergie avec les différences finies
+    plot!(Rs[skip+1:N-skip], ∂lE₀[ker_s:N], xlabel="R", label="∂E₀(R) par différences finies centrées o8",
+    legend=true, title="Énergie fondamentale du hamiltonien\nélectronique selon R et sa dérivée",
+    titlefontsize=11, color="blue")
+    # plot de l'énergie
+    plot!(Rs, lE₀, xlabel="R", label="E₀(R)", legend=true, color="green")
     savefig(raw"./énergie_fdmtle_hamiltonien.pdf") # dans C:/Users/matth
     
-    println("calcul expérimental des sécantes"); flush(stdout)
-    R_test = get_lowest_surface_energy_secant(Λr, δR, R_min, rs, N, 3/4*R_max+1/4*R_min, 1/4*R_max+3/4*R_min, .0001, kdim1d);
-    @show R_test, R₀;
-    return skip, lE₀, ∂lE₀, R₀, ind_R₀, R_test, u_min, u_max, δu, δu², us, ug, δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, LS, Λr
+    ### CALCUL DE L'ÉNERGIE DE SURFACE PAR LA MÉTHODE DES SÉCANTES ###
+    # méthode des sécantes
+    R_sec, n_iter = get_lowest_surface_energy_secant(Λr, δR, R_min, rs, N, 2/3*R_max+1/3*R_min,1/3*R_max+2/3*R_min, 1e-12, kdim1d, 100);
+    @show R_sec, R₀
+
+    # approximation des dérivées d'Ehrenfest et comparaison et plot
+    d∂E_fin_diff = approximation_dérivées_ehrenfest(∂lE₀, N, Λr, rs, Rs, kdim1d, skip, δR)
+
+    return d∂E_fin_diff, skip, lE₀, ∂lE₀, R₀, ind_R₀, R_sec, u_min, u_max, δu, δu², us, ug, δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, LS, Λr
 end
 
-skip, lE₀, ∂lE₀, R₀, ind_R₀, R_test, u_min, u_max, δu, δu², us, ug, δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, LS, Λr = test_debug_secant(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax);
+
+# APPEL AU DÉVELOPPEMENT
+d∂E_fin_diff, skip, lE₀, ∂lE₀, R₀, ind_R₀, R_sec,
+    u_min, u_max, δu, δu², us, ug, δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, LS, Λr = test_debug_secant(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax, .04);
 
 
 
-function test_derivative_ehrenfest()
-    skip, lE₀, ∂lE₀, R₀, ind_R₀, R_test, u_min, u_max, δu, δu², us, ug, δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, LS, Λr = test_debug_secant(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax);
+@show lE₀[ind_R₀]
 
-    d∂E_fin_diff = zeros(N-2*skip);
-    for ind_t in (skip+1):(N-skip)
-        R_t = Rs[ind_t]
-        Hr = copy(Λr);
-        Hr[diagind(Hr)] = diag(Λr) + Vector(V_nucl_el.(rs, R_t) .+ V_nucl_nucl(R_t)); 
-        vals, vecs, infos = KrylovKit.eigsolve(Hr, N, 1, :SR, krylovdim=kdim1d,
-                                                issymmetric=true, ishermitian=true);
-        @assert infos.converged ≥ 1;
-        ψ_t = Vector(vecs[1]);
+@show dot([1/280, −4/105, 1/5, −4/5, 0., 4/5, −1/5, 4/105, −1/280], lE₀[ind_R₀-4:ind_R₀+4])
 
-        # plot(rs, ψ_t, title="ψ_t")
-
-        ∂Hr = Diagonal(zeros(N));
-        ∂Hr[diagind(∂Hr)] = ∂R_V_nucl_el.(rs, R_t) .+ ∂V_nucl_nucl(R_t)
-        # plot(rs, diag(∂Hr), title="diag(∂Hr)")
-
-        dE_t_ehr = dot(ψ_t,∂Hr,ψ_t) # Ehrenfest
-        dE_t_fdi = ∂lE₀[ind_t+4]  # finite differences
-        d∂E_fin_diff[ind_t-skip] = abs(dE_t_ehr-dE_t_fdi)
-    end
-    plot(Rs[skip+1:N-skip], d∂E_fin_diff, yaxis=:log, xlabel="R", ylabel="erreur absolue", minorticks=1,
-    title="Approximation de ∂E₀/∂R: Différence entre\ndifférences finies centrées d'ordre 8 et théorème d'Ehrenfest)\nδR≈$(round(δR,digits=4))",
-    label="⟨ψ(R)|dH/dR(R)|ψ(R)⟩- ∫E(R)⋅K₈", legend=true, titlefontsize=11,
-    ylims=(1e-14,1e-8))
-    savefig("./erreur_dérivée.pdf")
-    return d∂E_fin_diff
-end
-
-d∂E_fin_diff = test_derivative_ehrenfest();
-    
+@show dot([1/280, −4/105, 1/5, −4/5, 0., 4/5, −1/5, 4/105, −1/280], lE₀[ind_R₀-4-1:ind_R₀+4-1])
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+Hr = copy(Λr);
+Hr[diagind(Hr)] = diag(Λr) + Vector(V_nucl_el.(rs, R_sec) .+ V_nucl_nucl(R_sec)); 
+vals, vecs, infos = KrylovKit.eigsolve(Hr, N, 1, :SR, krylovdim=kdim1d, issymmetric=true, ishermitian=true);
+@assert infos.converged ≥ 1;
 
 
 
@@ -308,11 +327,10 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
 
     
     ### CALCUL DE L'ÉNERGIE DE SURFACE ###
-    println("calcul de l'énergie de surface et son minimum"); flush(stdout)
-    lE₀, E₀_at_R₀, ind_R₀, R₀, K = get_lowest_surface_energy(Λr, δR, R_min, rs, Rs, N, kdim1d);
+    lE₀, E₀_at_R₀, ind_R₀, R₀, K = get_lowest_surface_energy_breadth_first(Λr, δR, R_min, rs, Rs, N, kdim1d);
     # la constante K ne dépend pas de la masse M
 
-    R_test = get_lowest_surface_energy_secant(Λr, δR, R_min, rs, N, 3/4*R_max+1/4*R_min, 1/4*R_max+3/4*R_min, .0001, kdim1d);
+    R_test = get_lowest_surface_energy_secant(Λr, δR, R_min, rs, N, 2/3*R_max+1/3*R_min,1/3*R_max+2/3*R_min, 1e-12, kdim1d, 100);
     @show R_test, R₀;
     
     Λ2D_elec = laplacian_2D_rescaled_dim_elec(N,N²);
