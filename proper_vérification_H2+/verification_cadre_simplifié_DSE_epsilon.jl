@@ -12,6 +12,8 @@ using IterativeSolvers
 using LinearMaps
 using DSP # pour la convolution et le fenêtrage
 using FFTW # pour les dérivées spectrales
+# using CUDA
+# using CUDA.CUSPARSE
 # using ImageFiltering # pour la convolution qui mime le comportement de matlab
 # using Optim
 # using Roots
@@ -66,11 +68,7 @@ H = [SpecialPolynomials.basis(Hermite, i)(x) for i in 0:3] # /!\ au décalage d'
 
 
 
-me = 1; mp = 500; Qmax=1;
-M=(2*mp^3+mp^2*me)/(2*mp*(me+mp));
-m=(2*mp^2*me)/(mp*(2*mp+me)); 
-r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=200; ω=1.;
-kdim1d=20; kdim2d = 70;
+# Paramètres de la fonction potentiel
 β=1.5; η=.5; V0=1.5; σ=1.;
 
 # INTERACTION ÉLECTRON-NUCLÉON
@@ -211,7 +209,7 @@ function get_lowest_surface_energy_grad_desc(Λr, δR, R_min, rs, N, R2, R1, ϵ,
         @show iter_nb, step, ∂E_rp; # montrer la progression lors de l'appel
     end
     
-    ### CALCUL DE LA DÉRIVÉE SECONDE (RAIDEUR) DE L'ÉNERGIE
+    ### CALCUL DE LA DÉRIVÉE SECONDE DE L'ÉNERGIE (RAIDEUR) 
     # avec les différences finies
     Hr = copy(Λr);
     diff2_ctr_o8 = [−1/560 8/315 −1/5 8/5 −205/72 8/5 −1/5 8/315 −1/560];
@@ -219,13 +217,13 @@ function get_lowest_surface_energy_grad_desc(Λr, δR, R_min, rs, N, R2, R1, ϵ,
     span = div(ker_size, 2);
     E_décal = zeros(ker_size);
     ind_décal = Vector(-span:span);
-    ψ_at_R₀ = zeros(N);
+    # ψ_at_R₀ = zeros(N);
     for (i,m) in enumerate(ind_décal)
         Hr[diagind(Hr)] = diag(Λr) + Vector(V_nucl_el.(rs, R_rp+i*δR) .+ V_nucl_nucl(R_rp+i*δR)); 
         vals, vecs, infos = KrylovKit.eigsolve(Hr, N, 1, :SR, krylovdim=kdim1d, issymmetric=true, ishermitian=true);
-        if i == 0
-            ψ_at_R₀ = vecs[1]; # obtenir l'état en R₀ pour le calcul de la dérivée seconde de E(R) en R₀
-        end
+        # if i == 0
+        #     ψ_at_R₀ = vecs[1]; # obtenir l'état en R₀ pour le calcul de la dérivée seconde de E(R) en R₀
+        # end
         @assert infos.converged ≥ 1;
         E_décal[i] = vals[1];
     end
@@ -246,14 +244,13 @@ function get_lowest_surface_energy_grad_desc(Λr, δR, R_min, rs, N, R2, R1, ϵ,
     ∂2Hr[diagind(∂2Hr)] = ∂2R_V_nucl_el.(rs, R_rp) .+ ∂2R_V_nucl_nucl(R_rp); 
     d2EdR2_ehr = dot(ψ_at_R₀, ∂2Hr, ψ_at_R₀) + 2*dot(dψdR, ∂Hr, ψ_at_R₀);
  =#
-
     return R_rp, E_décal[span+1], d2EdR2_fd # R₀, E₀_at_R₀, K
 end
 
 
 
 
-function plot_énergies_dérivées(N, Λr, rs, Rs, kdim1d, δR, α_tuk)
+function plot_énergies_dérivées(N, Λr, rs, Rs, kdim1d, δR, lE₀, α_tuk)
     println("calcul dérivées différences finies sur la grille originale"); flush(stdout)
     
     # code pour les dérivées par différences finies prises sur la grille
@@ -319,7 +316,7 @@ end
 
 
 # cette fonction reprend le code du début de la fonction complète et fait des plots
-function tests_nv_méthodes(r_min, r_max, R_min, R_max, N, m, kdim1d, kdim2d, Qmax, α_tuk)
+function tests_nv_méthodes(r_min, r_max, R_min, R_max, N, m, kdim1d, Qmax, α_tuk)
     u_min, u_max, δu, δu², us, ug = get_rescaling(N);
     δr, δR, δr², δR², N², rs, Rs, rg, Rg, V = get_params_grille(r_max, r_min, R_max, R_min, N);
 
@@ -336,46 +333,25 @@ function tests_nv_méthodes(r_min, r_max, R_min, R_max, N, m, kdim1d, kdim2d, Qm
         heatmap(rs, Rs, V', xlabel="r", ylabel="R", title="Potentiel de H₂⁺ (r,R) ↦ V(r,R) = Vnn(R)+Ven(r+R/2)+Ven(r-R/2)",
         c = cgrad(:deep, rev=true), titlefontsize=11,
         bbox_inches="tight")
-        savefig("./potentiel_original.pdf")
+        savefig("./potentiel_original_R.pdf")
 
     # LAPLACIENS SUR AXES INDEPENDANTS DE M
     Λr = -1/(δr²*2*m)*LS;  # laplacien sur l'axe r
 
     ### CALCUL DE L'ÉNERGIE DE SURFACE PAR LA MÉTHODE DES SÉCANTES ### gd = gradient descent
     R₀_gd, E₀_at_R₀_gd, K_gd                     = get_lowest_surface_energy_grad_desc(Λr, δR, R_min, rs, N, 2/3*R_max+1/3*R_min, 1/3*R_max+2/3*R_min, 1e-12, kdim1d, 30);
-    ### CALCUL DE L'ÉNERGIE DE SURFACE PAR PARCOURS EN LARGEUR ###     gs = grid sampling
+    ### CALCUL DE L'ÉNERGIE DE SURFACE PAR PARCOURS EN LARGEUR     ### gs = grid sampling
     lE₀_gs, E₀_at_R₀_gs, ind_R₀_gs, R₀_gs, K_gs  = get_lowest_surface_energy_br_search(Λr, δR, R_min, rs, Rs, N, kdim1d);
     @show R₀_gd, R₀_gs
     @show K_gd, K_gs
 
     # PLOT DIFFÉRENCE ENTRE DÉRIVÉES D'EHRENFEST ET DIFF FINIES EN LOG
-    plot_énergies_dérivées(N, Λr, rs, Rs, kdim1d, δR, α_tuk);
+    plot_énergies_dérivées(N, Λr, rs, Rs, kdim1d, δR, lE₀_gs, α_tuk);
 
     return R₀_gd, R₀_gs, K_gd, K_gs,
            u_min, u_max, δu, δu², us, ug, δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, LS, Λr
 end
 
-
-# APPEL AUX TESTS
-R₀_gd, R₀_gs, K_gd, K_gs,
-u_min, u_max, δu, δu², us, ug, δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, LS, Λr = tests_nv_méthodes(r_min, r_max, R_min, R_max, N, m, kdim1d, kdim2d, Qmax, .04);
-
-
-
-# QUELQUES VÉRIFICATIONS POUR MONTRER QUE LES SÉCANTES ONT BIEN MIEUX FONCTIONNÉ QUE L'ÉCHANTILLONNAGE
-Hr = copy(Λr);
-Hr[diagind(Hr)] = diag(Λr) + Vector(V_nucl_el.(rs, R_sec) .+ V_nucl_nucl(R_sec)); 
-vals, vecs, infos = KrylovKit.eigsolve(Hr, N, 1, :SR, krylovdim=kdim1d, issymmetric=true, ishermitian=true);
-@assert infos.converged ≥ 1;
-@assert vals[1] < lE₀[ind_R₀];
-
-@show lE₀[ind_R₀]
-@assert lE₀[ind_R₀-1] > lE₀[ind_R₀];
-@assert lE₀[ind_R₀+1] > lE₀[ind_R₀];
-
-@show dot([1/280, −4/105, 1/5, −4/5, 0., 4/5, −1/5, 4/105, −1/280], lE₀[ind_R₀-4:ind_R₀+4])
-
-@show dot([1/280, −4/105, 1/5, −4/5, 0., 4/5, −1/5, 4/105, −1/280], lE₀[ind_R₀-4-1:ind_R₀+4-1])
 
 
 
@@ -389,6 +365,9 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     l_Ψ_pert = zeros(N*N,l);
     l_Ψ_true = zeros(N*N,l);
     l_Ψ_HBO  = zeros(N*N,l);
+    l_V_true = zeros(N,N,l);
+    l_V_HBO  = zeros(N,N,l);
+    l_V_pert = zeros(N,N,l);
     l_E_true = zeros(l);
     # l_E_diff = zeros(l); # pour vérifier l'approximation E₁-E₀ ≈ ω₀
     l_E_pert = zeros(l);
@@ -408,10 +387,8 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     @assert length(rs) == length(Rs) == length(us) == N;
 
     # CONSTRUCTION DU POTENTIEL ORIGINAL ET DU HAMILTONIEN SUR GRILLE paramétré en R
-    V[:,:] = @. V_nucl_el(rg, Rg) + V_nucl_nucl(Rg); # potentiel d'interaction sur la grille tous phénomènes compris (non tronqué)
-
-
-
+    V[:,:] = @. V_nucl_el.(rg, Rg) + V_nucl_nucl(Rg); # potentiel d'interaction sur la grille tous phénomènes compris (non tronqué)
+    
     # STRUCTURE DU LAPLACIEN 1D
     LS = SymTridiagonal(-2*ones(Float64,N), ones(Float64,N-1)); 
 
@@ -419,17 +396,22 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
     Λr = -1/(δr²*2*m)*LS;  # laplacien sur l'axe r
 
     
-    ### CALCUL DE L'ÉNERGIE DE SURFACE ###
-    ~, ~, ind_R₀, R₀, K    = get_lowest_surface_energy_br_search(Λr, δR, R_min, rs, Rs, N, kdim1d);
-    # la constante K ne dépend pas de la masse M
+    ### CALCUL DE L'ÉNERGIE DE SURFACE ### la constante K ne dépend pas de la masse M
+#=   # par la méthode d'échantillonnage
+    ~, ~, ind_R₀, R₀, K = get_lowest_surface_energy_br_search(Λr, δR, R_min, rs, Rs, N, kdim1d);
+    println("échantillonnage:"); flush(stdout)
+    @show R₀, K
+=#
 
-    R₀_gd, E₀_at_R₀_gd, K  = get_lowest_surface_energy_grad_desc(Λr, δR, R_min, rs, N, 2/3*R_max+1/3*R_min, 1/3*R_max+2/3*R_min, 1e-12, kdim1d, 30);
+    # par la méthode des sécantes (descente de gradient)
+    R₀, E₀_at_R₀, K     = get_lowest_surface_energy_grad_desc(Λr, δR, R_min, rs, N, 2/3*R_max+1/3*R_min, 1/3*R_max+2/3*R_min, 1e-12, kdim1d, 30);
+    println("ehrenfest:"); flush(stdout)
+    @show R₀, K
 
-    
+
     Λ2D_elec = laplacian_2D_rescaled_dim_elec(N,N²);
     Λ2D_nucl = laplacian_2D_rescaled_dim_nucl(N,N²);
 
-    
 ############# ICI COMMENCE LA BOUCLE POUR LA MASSE (ce qui précède ne change pas si M change) #############
     for (ind_M,M) in enumerate(lM)
 
@@ -440,55 +422,60 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
 
         # LAPLACIENS SUR AXES
         Λu = -K*ϵ²/δu²*LS;            # laplacien sur l'axe (Ou)
-    
-
+    #   Λr = ... défini +haut hors boucle
 
         # FONCTIONS POTENTIELS HBO NON PERTURBÉS SUR AXES SÉPARÉS  
-        V₀rs  = V[:,ind_R₀];          # cf formule 3.19 deuxième ligne du rapport sans la constante .- E₀_at_R₀
+    #   V₀rs  = V[:,ind_R₀];          # cf formule 3.19 deuxième ligne du rapport sans la constante .- E₀_at_R₀
         V₀rs  = @. V_nucl_el(rg, R₀) + V_nucl_nucl(R₀);
         V₀us  = .5*K*(ϵ*us).^2        # cf formule 3.23 première ligne du rapport sans la constante .+ E₀_at_R₀
     
         # OPÉRATEURS POTENTIELS HBO NON PERTURBÉS SUR AXES SÉPARÉS 
         V̂⁰rs  = Diagonal(V₀rs);
         V̂⁰us  = Diagonal(V₀us);
-
     
-        # OPÉRATEURS RESCALED SUR GRILLE
-        V_res = @. V_nucl_el(rg, R₀.+ϵ*ug) + V_nucl_nucl(R₀.+ϵ*ug); # (r,u) ↦ V(r,u) 
+        # FONCTION POTENTIEL RESCALÉ ORIGINAL SUR GRILLE
+        V_res = V_nucl_el.(rg, R₀.+ϵ*ug) + V_nucl_nucl.(R₀.+ϵ*ug); # (r,u) ↦ V(r,u) 
+                                           #V_nucl_nucl.(R₀.+ϵ*us)'.* ones(N)
 
-    
-        # FONCTION POTENTIEL HBO NON PERTURBÉ SUR GRILLE
+        # FONCTION POTENTIEL RESCALÉ HBO NON PERTURBÉ SUR GRILLE
         # formule 3.19: somme des deux premières lignes en potentiel:
         # que deux car seulement deux paramétrages (R et u)
-        V₀Rg  = @. V₀rs*ones(N)'  + .5*K*(Rg.-R₀).^2; # (r,R) ↦ V(r,R₀) + 1/2*(∂²E₀/∂R²)(R₀)(R-R₀)²
-        V₀ug  = @. V_nucl_el(rg, R₀) + V_nucl_nucl(R₀)  + .5*K*ϵ²*ug.^2;   # (r,u) ↦ V(r,u₀) + Kϵ²/2*(∂²E₀/∂u²)(u₀)(u-u₀)²
+        V₀Rg  = @. V₀rs*ones(N)'  + .5*K*(Rg.-R₀).^2;                      # (r,R) ↦ V(r,R₀) + 1/2*(∂²E₀/∂R²)(R₀)(R-R₀)²
+        V₀ug  = V_nucl_el.(rg, R₀) .+ V_nucl_nucl(R₀)  + .5*K*ϵ²*ug.^2;    # (r,u) ↦ V(r,u₀) + Kϵ²/2*(∂²E₀/∂u²)(u₀)(u-u₀)²
     
-        # OPÉRATEUR POTENTIEL NON PERTURBÉ SUR GRILLE
+        l_V_true[:,:,ind_M] = V_res[:,:];
+        l_V_HBO[:,:,ind_M]  = V₀ug[:,:];
+
+
+        # OPÉRATEUR POTENTIEL RESCALÉ HBO NON PERTURBÉ SUR GRILLE
         V̂⁰ug = Diagonal(reshape(V₀ug, N²));
-    
+
+        # OPÉRATEUR POTENTIEL RESCALÉ ORIGINAL SUR GRILLE
+        V̂_res = Diagonal(reshape(V_res, N²));
+
         # CONSTRUCTION DU POTENTIEL ET DU HAMILTONIEN NON PERTURBÉS HBO SUR GRILLE
         # création du laplacien 2D sur grille qui factorise les deux cas 𝔥₀ et 𝔥
         Λ𝔥 = K*ϵ²/2/δu²*Λ2D_nucl + 1/(2*m*δr²)*Λ2D_elec;
         
-        # OPÉRATEUR RESCALÉ NON PERTURBÉ SUR GRILLE
+        # OPÉRATEUR HAMILTONIEN RESCALÉ NON PERTURBÉ SUR GRILLE
         𝔥₀ = Λ𝔥 + V̂⁰ug                         # 𝔥 : Ψ(r,u) ∈ L²(ℝ^N^2) ↦ -1/2m × ∂²/∂r² -1/2M × ∂²/∂u² + V(r,u₀) + Kϵ²/2*(∂²E₀/∂u²)(u₀)(u-u₀)² le hamiltonien HBO non perturbé paramétré en u
     
-        # OPÉRATEUR RESCALÉ ORIGINAL SUR GRILLE
-        𝔥  = Λ𝔥 + Diagonal(reshape(V_res, N²)) # 𝔥 : Ψ(r,u) ∈ L²(ℝ^N^2) ↦ -1/2m × ∂²/∂r² -1/2M × ∂²/∂u² + V(r,u) le hamiltonien original complet
+        # OPÉRATEUR HAMILTONIEN RESCALÉ ORIGINAL SUR GRILLE
+        𝔥  = Λ𝔥 + V̂_res # 𝔥 : Ψ(r,u) ∈ L²(ℝ^N^2) ↦ -1/2m × ∂²/∂r² -1/2M × ∂²/∂u² + V(r,u) le hamiltonien original complet
 
-        println("perturbations"); flush(stdout)
+        println("calcul des opérateurs pour les perturbations"); flush(stdout)
         # FONCTION PERTURBATION Vp (développement de Taylor de la perturbation)
-        diff1_ctr_o8 = [1/280 −4/105 1/5 −4/5 0. 4/5 −1/5 4/105 −1/280];
-        diff2_ctr_o8 = [−1/560 8/315 −1/5 8/5 −205/72 8/5 −1/5 8/315 −1/560];
+#       diff1_ctr_o8 = [1/280 −4/105 1/5 −4/5 0. 4/5 −1/5 4/105 −1/280];
+#       diff2_ctr_o8 = [−1/560 8/315 −1/5 8/5 −205/72 8/5 −1/5 8/315 −1/560];
         # ordre 1 en espace: (∂V/∂R)(r,R₀)×(R-R₀)
-        ∂R_of_V_at_rR₀   = 1/δR*  V[:,ind_R₀-4:ind_R₀+4]*diff1_ctr_o8';       # vecteur, donne r ↦ ∂V/∂R(r,R₀)                                                   
-        ∂R_of_V_ar_rR₀   = ∂R_V_nucl_el.(rs, R₀) .+ ∂R_V_nucl_nucl(R₀);
+#       ∂R_of_V_at_rR₀   = 1/δR*  V[:,ind_R₀-4:ind_R₀+4]*diff1_ctr_o8';       # vecteur, donne r ↦ ∂V/∂R(r,R₀)                                                   
+        ∂R_of_V_at_rR₀   = ∂R_V_nucl_el.(rs, R₀) .+ ∂R_V_nucl_nucl(R₀);
         # ordre 2 en espace: 1/2×[(∂²V/∂R²)(r,R₀) - d²E₀/dR²(R₀)](R-R₀)² 
-        ∂²RR_of_V_at_rR₀ = 1/δR²* V[:,ind_R₀-4:ind_R₀+4]*diff2_ctr_o8';       # vecteur, donne r ↦ ∂²V/∂R²(r,R₀)
+#       ∂²RR_of_V_at_rR₀ = 1/δR²* V[:,ind_R₀-4:ind_R₀+4]*diff2_ctr_o8';       # vecteur, donne r ↦ ∂²V/∂R²(r,R₀)
         ∂²RR_of_V_at_rR₀ = ∂2R_V_nucl_el.(rs, R₀) .+ ∂2R_V_nucl_nucl(R₀);                               
 
     
-        # OPÉRATEURS HAMILTONIENS NON PERTURBÉS RESCALÉS SUR AXES SÉPARÉS
+        # OPÉRATEURS HAMILTONIENS HBO NON PERTURBÉS SUR AXES SÉPARÉS
         𝔥u = K*ϵ²*(-1/2/δu²*LS + 1/2*Diagonal(us.^2));  # 𝔥u : ψ(u) ∈ L²(ℝ^N) ↦ 1/2 × Kϵ²(-∂²/∂u² + u²)ψ pour la solution-produit tensoriel
         𝔥r = Λr + V̂⁰rs;                                 # 𝔥r : ψ(r) ∈ L²(ℝ^N) ↦ 1/2 ×    (-∂²/∂r² + R²)ψ pour la solution-produit tensoriel
     
@@ -496,7 +483,9 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         𝔴₁ = ϵ*∂R_of_V_at_rR₀.*ug;                              # matrice, donne (r, u) ↦ u × ∂V/∂u(r,u₀)
         𝔴₂ = .5*ϵ^2*(∂²RR_of_V_at_rR₀*ones(N)' .- K) .*ug.^2;   # matrice, donne (r, u) ↦ 1/2 × u² × ∂V/∂u(r,u₀)
         Vp_res = 𝔴₁ + 𝔴₂; # perturbation totale ordre 1 + ordre 2 en espace (troncature à automatiser éventuellement à tout ordre)
-            
+        
+        l_V_pert[:,:,ind_M] = Vp_res[:,:];
+        
         Ŵu = Diagonal(reshape(Vp_res,N²)); # opérateur correspondant à la perturbation paramétrée en u
         
 
@@ -522,11 +511,13 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
 
 
         println("calcul solution_référence par Krylov"); flush(stdout)
+        @show typeof(𝔥);
         ### CALCUL DE LA SOLUTION 2D POUR RÉFÉRENCE DU HAMILTONIEN D'INTÉRÊT PARAMÉTRÉ EN u ###
-        lE, lϕ, info_2d = KrylovKit.eigsolve(𝔥, N², 1, :SR, krylovdim=kdim2d); # KrylovKit.eigsolve plus rapide que Arpack.eigs globalement
+        @time lE, lϕ, info_2d = KrylovKit.eigsolve(𝔥, N², 1, :SR, krylovdim=kdim2d[ind_M]); # KrylovKit.eigsolve plus rapide que Arpack.eigs globalement
         @assert info_2d.converged ≥ 1;              # mettre 2 pour trouver aussi le second mode propre
-        # l_E_diff[ind_M] = lE[2] - lE[1];
-
+        # l_E_diff[ind_M] = lE[2] - lE[1];          # vérifier que l'approximation E₁-E₀ ≈ Kϵ²
+        @show lE;
+        
         println("## théorie des perturbations"); flush(stdout)
         l_Ψ_true[:,ind_M] = lϕ[1];
         l_E_true[ind_M] = lE[1];
@@ -613,7 +604,7 @@ function decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kd
         résidus_pert[ind_M]    = norm(𝔥*l_Ψ_pert[:,ind_M] - l_E_pert[ind_M]*l_Ψ_pert[:,ind_M]);
         Kϵ²[ind_M]      = K*ϵ²;
     end
-    return l_Ψ_H1, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_L2, l_E_err, # résultats
+    return l_Ψ_H1, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_L2, l_E_err, l_V_true, l_V_HBO, l_V_pert,# résultats
            N², rs, Rs, rg, Rg, V, LS, Λr, # paramètres
            u_min, u_max, δu, δu², us, ug # rescaling
 end
@@ -622,33 +613,234 @@ end
 
 
 
-lM = [100, 150, 250, 500, 700, 1000, 3000, 5000];
-@time l_Ψ_H1, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_L2, l_E_err,
+
+# APPEL AUX TESTS
+me = 1; mp = 20; Qmax=1;
+M=(2*mp^3+mp^2*me)/(2*mp*(me+mp));
+m=(2*mp^2*me)/(mp*(2*mp+me)); 
+r_min=-5.; r_max=5.; R_min=0.0; R_max=3.5; N=150;
+kdim1d=20; kdim2d = 90;
+α_tuckey = .06; kdim1d=20;
+
+R₀_gd, R₀_gs, K_gd, K_gs,
+u_min, u_max, δu, δu², us, ug, δr, δR, δr², δR², N², rs, Rs, rg, Rg, V, LS, Λr = tests_nv_méthodes(r_min, r_max, R_min, R_max, N, m, kdim1d, Qmax, α_tuckey);
+
+
+
+# QUELQUES VÉRIFICATIONS POUR MONTRER QUE LES SÉCANTES ONT BIEN MIEUX FONCTIONNÉ QUE L'ÉCHANTILLONNAGE
+#= Hr = copy(Λr);
+Hr[diagind(Hr)] = diag(Λr) + Vector(V_nucl_el.(rs, R_sec) .+ V_nucl_nucl(R_sec)); 
+vals, vecs, infos = KrylovKit.eigsolve(Hr, N, 1, :SR, krylovdim=kdim1d, issymmetric=true, ishermitian=true);
+@assert infos.converged ≥ 1;
+@assert vals[1] < lE₀[ind_R₀];
+
+@show lE₀[ind_R₀]
+@assert lE₀[ind_R₀-1] > lE₀[ind_R₀];
+@assert lE₀[ind_R₀+1] > lE₀[ind_R₀];
+
+@show dot([1/280, −4/105, 1/5, −4/5, 0., 4/5, −1/5, 4/105, −1/280], lE₀[ind_R₀-4:ind_R₀+4])
+
+@show dot([1/280, −4/105, 1/5, −4/5, 0., 4/5, −1/5, 4/105, −1/280], lE₀[ind_R₀-4-1:ind_R₀+4-1]) =#
+
+
+# PROCESSUS COMPLET
+lM = [250, 500, 1000, 3000, 5000, 10000, 50000, 80000, 100000];
+lM = 10 .^ LinRange(2.5, 5, 8);
+lM = [20];
+
+kdim2d = [60, 60, 60, 80, 80, 80, 80, 90];
+kdim2d = [30];
+
+@time l_Ψ_H1, λ_approx, résidus_approx, résidus_pert, Kϵ², l_E_pert, l_E_true, l_Ψ_pert, l_Ψ_true, l_Ψ_HBO, l_Ψ_L2, l_E_err, l_V_true, l_V_HBO, l_V_pert,
             N², rs, Rs, rg, Rg, V, LS, Λr,
             u_min, u_max, δu, δu², us, ug = decompose_hamiltonian_rescaled(r_min, r_max, R_min, R_max, N, m, lM, kdim1d, kdim2d, Qmax);
 
 
 
 
+
+# Faisons un plot du vecteur DE RÉFÉRENCE du premier (plus petite masse) état référence et perturbé
+densité = N^2/(u_max-u_min)/(r_max-r_min);
+ϕ_réf = densité*Matrix(transpose(reshape(l_Ψ_true[:,1].^2,N,N)));
+heatmap(rs, us, ϕ_réf,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    color=:viridis,
+    title = "État |Ψ|², sol. réf. pr. M=$(lM[1]), E=$(round(l_E_true[1],digits=4))",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 5Plots.mm)
+savefig("./sol_Psi_true.pdf")
+
+# avec un contour
+contour(rs, us, ϕ_réf,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    color=:viridis,
+    title = "État |Ψ|², sol. réf. pr. M=$(lM[1]), E=$(round(l_E_true[1],digits=4))",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 5Plots.mm,
+    colorscale="Hot",
+    contours_start=0,
+    contours_end=.3,
+    contours_size=2)
+savefig("./sol_Psi_true_ct.pdf")
+
+
+# Faisons un plot du vecteur PERTURBÉ du premier (plus petite masse) état référence et perturbé
+densité = N^2/(u_max-u_min)/(r_max-r_min);
+ϕ_pert = densité*Matrix(transpose(reshape(l_Ψ_pert[:,1].^2,N,N)));
+heatmap(rs, us, ϕ_pert,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    color=:viridis,
+    title = "État |Ψ|², sol. HBO perturbée ordre $Qmax, M=$(lM[1]), E=$(round(l_E_pert[1],digits=4))",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 8Plots.mm)
+savefig("./sol_Psi_pert.pdf")
+
+# avec un contour
+contour(rs, us, ϕ_pert,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    color=:viridis,
+    title = "État |Ψ|², sol. HBO perturbée ordre $Qmax, M=$(lM[1]), E=$(round(l_E_pert[1],digits=4))",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 5Plots.mm,
+    colorscale="Hot",
+    contours_start=0,
+    contours_end=.3,
+    contours_size=2)
+savefig("./sol_Psi_pert_ct.pdf")
+
+
+# Faisons un plot du potentiel ORIGINAL
+V_ori = Matrix(l_V_true[:,:,1]');
+heatmap(rs, us, V_ori,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    c = cgrad(:deep, rev=true),
+    title = "Potentiel original de H₂⁺ (r,u) ↦ V(r,u)  M=$(lM[1])",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 8Plots.mm)
+savefig("./potentiel_original.pdf")
+
+
+# Faisons un plot du potentiel HBO
+V_HBO = Matrix(l_V_HBO[:,:,1]');
+heatmap(rs, us, V_HBO,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    c = cgrad(:deep, rev=true),
+    title = "Potentiel HBO de H₂⁺ (r,u) ↦ V₀(r,u)  M=$(lM[1])",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 8Plots.mm)
+savefig("./potentiel_HBO.pdf")
+
+
+# Faisons un plot du potentiel PERTURBATION
+V_pert = Matrix(l_V_pert[:,:,1]');
+heatmap(rs, us, V_pert,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    c = cgrad(:deep, rev=true),
+    title = "Perturbation à l'ordre 2 en espace\nsur HBO de H₂⁺ (r,u) ↦ Vₚ(r,u)  M=$(lM[1])",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 8Plots.mm)
+savefig("./potentiel_pert.pdf")
+
+# Faisons un plot du potentiel ERREUR
+V_err = Matrix((l_V_true[:,:,1]-l_V_HBO[:,:,1]-l_V_pert[:,:,1])');
+heatmap(rs, us, V_err,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    color=:cividis,
+    title = "Erreur de H₂⁺ (r,u) ↦ (V-V₀-Vₚ)(r,u)  M=$(lM[1])",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 8Plots.mm)
+savefig("./potentiel_erreur.pdf")
+
+# et erreur relative
+V_err_rel = V_err ./ (.01 .+ abs.(V_ori));
+heatmap(rs, us, V_err_rel,
+    xlims = (r_min,r_max),
+    ylims = (u_min,u_max),
+    xlabel="coordonnée électronique r",
+    ylabel="coordonnée nucléaire u",
+    color=:cividis,
+    title = "Erreur relative de H₂⁺ (r,u) ↦ (V-V₀-Vₚ)(r,u)  M=$(lM[1])",
+    aspect_ratio=:auto,
+    titlefontsize=10,
+    size=(500,300),
+    right_margin = 8Plots.mm,
+    up_margin = 8Plots.mm)
+
+    
+
+# ANALYSE DES RÉSULTATS DE L'ALGORITHME COMPLET
 kato_temple_est = résidus_approx.^2 ./ Kϵ²;
 plot(lM, [l_E_err, kato_temple_est, résidus_pert, l_Ψ_L2.^2, l_Ψ_H1.^2],
             xaxis=:log, yaxis=:log, seriestype = :scatter,
-            title="Variables de contrôle",
+            title="Variables de contrôle, grille N=$N\nPerturbation à l'ordre Qmax=$Qmax", titlefontsize=10,
             label=["erreur énergie à la référence: |Eₐ-E|" "Kato-Temple quotient Rayleigh: ||hΨₐ-⟨Ψₐ,h,Ψₐ⟩Ψₐ||²/ω₀ (norme 2)" "résidu ||hΨₐ-EₐΨₐ|| (norme 2)" "erreur état à la référence ||Ψₐ-Ψ||² (norme 2)" "erreur état à la référence ||Ψₐ-Ψ||² (norme H1)"],
-            xlabel="masse M", size=(600,400), ylims=(1e-5,1e-1), legend=:bottomleft) 
-savefig("./resultats.pdf")
+            xlabel="masse M", size=(700,400), ylims=(1e-5,1e-1), legend=:bottomleft) 
+savefig("./résultats.pdf")
+
 
 # pour afficher les pentes
-abscisses = log10.(lM[1:6]);
-ord_E     = log10.(l_E_err[1:6]);
+ind_start = 4; ind_stop = 8;
+ind_len = ind_stop-ind_start+1;
+abscisses = log10.(lM[ind_start:ind_stop]);
+ord_E     = log10.(l_E_err[ind_start:ind_stop]);
 ord_H1_c  = l_Ψ_H1.^2;
-ord_H1    = log10.(ord_H1_c[1:6]);
+ord_H1    = log10.(ord_H1_c[ind_start:ind_stop]);
 ord_L2_c  = l_Ψ_L2.^2;
-ord_L2    = log10.(ord_L2_c[1:6]);
+ord_L2    = log10.(ord_L2_c[ind_start:ind_stop]);
 
-@show (ord_H1[6]-ord_H1[1])/(abscisses[6]-abscisses[1]);
-@show (ord_E[6]-ord_E[1])/(abscisses[6]-abscisses[1]);
-@show (ord_L2[6]-ord_L2[1])/(abscisses[6]-abscisses[1]);
+@show (ord_H1[ind_len]-ord_H1[1])/(abscisses[ind_len]-abscisses[1]);
+@show (ord_E[ind_len]-ord_E[1])/(abscisses[ind_len]-abscisses[1]);
+@show (ord_L2[ind_len]-ord_L2[1])/(abscisses[ind_len]-abscisses[1]);
+
+
 
 
 heatmap(rs, us, reshape(l_Ψ_pert[:,6],N,N)'.^2, xlabel="coordonnée électronique r", ylabel="coordonnée nucléaire R")
@@ -659,20 +851,3 @@ plot(lM, l_E_err, yaxis=:log, seriestype = :scatter, label="erreur énergie", xl
 plot(lM, l_Ψ_L2, yaxis=:log, seriestype = :scatter, label="résidu", xlabel="masse M", ylabel="|Ψ - Ψₚ|",size=(400,200))
 
 
-using CUDA
-using CUDA.CUSPARSE
-using LinearAlgebra
-using SparseArrays
-using IterativeSolvers
-using KrylovKit
-N = 100;
-r_cpu = sprand(N*N,N*N,1/N/N);
-r_gpu = CuSparseMatrixCSC(r_cpu);
-x_cpu = rand(N*N);
-x_gpu = cu(x_cpu);
-
-@time KrylovKit.eigsolve(r_cpu, N*N, 1, :SR, krylovdim=20);
-CUDA.@time KrylovKit.eigsolve(r_gpu, N*N, 1, :SR, krylovdim=20);
-
-@time      d_cpu = cg(r_cpu, x_cpu);
-CUDA.@time d_gpu = cg(r_gpu, x_gpu);
