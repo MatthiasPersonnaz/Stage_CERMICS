@@ -1,0 +1,66 @@
+
+\section{Schéma de \textsc{Crank-Nicholson}}
+Je pars de l'équation de Schrödinger instationnaire
+
+\begin{equation}
+    \I\hbar \frac{\partial\psi}{\partial t} = -\frac{\hbar^2}{2m} \Delta \psi + V\psi
+\end{equation}
+
+que je simule sous la forme $\frac{\partial\psi}{\partial t} = \frac{\I}{2} \Delta \psi -\frac{\I}{2} V \psi$ (avec $\hbar = m = 1$) avec un potentiel stationnaire.
+
+J'utilise un schéma de Crank-Nicholson c'est-à-dire que l'on écrit
+
+\begin{multline}
+\frac{\psi_{i,j}^{n+1}-\psi_{i,j}^{n}}{\Delta t} = \frac{\I}{2} \frac{1}{2(\Delta x)^2} [(\psi_{i+1,j}^{n+1} -2 \psi_{i,j}^{n+1} + \psi_{i-1,j}^{n+1}) + (\psi_{i+1,j}^{n} -2 \psi_{i,j}^{n}  + \psi_{i-1,j}^{n+1})] \\+ \frac{\I}{2} \frac{1}{2(\Delta y)^2} [(\psi_{i,j+1}^{n+1} -2 \psi_{i,j}^{n+1} + \psi_{i,j-1}^{n+1}) + (\psi_{i,j+1}^{n} -2 \psi_{i,j}^{n} + \psi_{i,j-1}^{n})] \\ - \frac{\I}{2} V_{i,j} [\psi_{i,j}^{n+1} + \psi_{i,j}^{n}]
+\end{multline} où $\psi_{i,j}$
+ représente la valeur prise par $\psi$ en $(x_{min}+i\Delta x, y_{min}+j\Delta y)$.
+
+
+Je pose ensuite $r_x = \frac{\I}{2}\frac{\Delta t}{2(\Delta x)^2}$, $r_y = \frac{\I}{2}\frac{\Delta t}{2(\Delta y)^2}$ et $r_t = \frac{\I \Delta t}{2}$.
+
+
+A chaque étape de temps, on résoudra un système linéaire en raison du laplacien et de la partie implicite (progressive) du schéma. On réarrange les $N^2$ valeurs discrétisées $\psi_{i,j}$ en un vecteur $\psi$ déplié dans $\mathbb{R}^{N^2}$ en parcourant les colonnes (indice $i$) d'abord. On fait de même avec le potentiel $V$ qui est une donnée du problème.
+Après réarrangement de l'équation aux différences finies ci-dessus, on obtient la relation matricielle suivante:
+
+\begin{equation}
+M^{(n+1)} \psi^{(n+1)} + r_t \text{diag}(V)\psi^{(n+1)} = M^{(n)} \psi^{(n)} -r_t \text{diag}(V) \psi^{(n)}
+\end{equation}
+
+
+Où 
+
+\begin{equation}
+    M_{pro} =  \begin{pmatrix}
+1+2(r_x+r_y) & -r_x &  & r_y &  &  \\
+-r_x & 1+2(r_x+r_y) &  &  & \ddots &  \\
+ &  & \ddots &  &  & r_y \\
+r_y &  &  &  &  &  \\
+ & \ddots &  &  & \ddots & -r_x \\
+ &  & r_y &  & -r_x & 1+2(r_x+r_y) 
+\end{pmatrix}  \in\mathbb{R}^{N^2\times N^2} 
+\end{equation}
+et
+
+\begin{equation}
+    M_{reg} =   \begin{pmatrix}
+1-2(r_x+r_y) & r_x &  & -r_y &  &  \\
+r_x & 1-2(r_x+r_y) &  &  & \ddots &  \\
+ &  & \ddots &  &  & -r_y \\
+-r_y &  &  &  &  &  \\
+ & \ddots &  &  & \ddots & r_x \\
+ &  & -r_y &  & r_x & 1-2(r_x+r_y) 
+\end{pmatrix}  \in\mathbb{R}^{N^2\times N^2}
+\end{equation}
+
+
+sont tridiagonales par blocs $N\times N$.
+
+
+
+
+Ainsi, on calcule une unique fois les matrices $M_{pro} = M^{(n+1)}  + r_t \text{diag}(V)$ (partie progressive), $M_{reg} = M^{(n)}  + r_t \text{diag}(V)$ (partie régressive), et enfin la matrice $M = M_{pro}^{-1}M_{reg}$. Par récurrence, $\psi(n\Delta t) = M^n \psi (0)$.
+
+\paragraph{Optimisation du code}
+Les matrices $M_{reg}$ et $M_{pro}$ sont creuses et se prêtent très bien aux types de matrices optimisés de \codeword{julia}, notamment \codewordred{Symmetric} et \codewordred{Diagonal}.
+Deux méthodes s'offrent à nous pour résoudre un système linéaire en \codeword{julia}: inverser la matrice à l'aide des routines du paquet \codewordblue{LinearAlgebra} ou inverser le système linéaire à l'aire de la commande \codeword{\ }. Cette dernière est plus précise d'un ordre de grandeur en moyenne mais beaucoup plus lente (facteur 100 en temps et 10000 en espace).
+

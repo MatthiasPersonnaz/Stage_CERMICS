@@ -1,0 +1,117 @@
+où la première ligne est le hamiltonien d'un oscillateur harmonique 1D, dont les éléments propres sont connues analytiquement.
+
+Si l'on se place ensuite en $x_0$ minimisant le potentiel $V$ sur l'axe $(Ox)$ à $y=y_0$ fixé:
+\begin{equation}
+    x_0 = \argmin_{x\in\mathbb{R}} V(x,y_0)
+\end{equation}
+
+On a alors le développement limité à l'ordre 2 suivant où la condition de minimalité entraîne la nullité du terme d'ordre 1:
+\begin{equation}
+    \textcolor{PineGreen}{V(x,y_0)} = \textcolor{red}{V(x_0,y_0)} + \textcolor{red}{\frac{1}{2}\frac{\partial^2 V}{\partial x^2}(x_0,y_0) (x-x_0)^2} +  \textcolor{red}{\underset{x\rightarrow x_0}{o} (x-x_0)^2}
+\end{equation}
+
+Alors le hamiltonien peut finalement se réécrire
+
+\begin{equation}
+        H = \text{cte} + H_x + H_y + W
+\end{equation}
+avec
+\begin{equation}
+       \left\{  \begin{array}{ll}
+        \text{cte} &= \textcolor{red}{V(x_0,y_0)} \\
+        H_y &= - \frac{1}{2m} \frac{\partial^2}{\partial y^2} \textcolor{Purple}{+ \frac{1}{2} \frac{\mathrm{d}^2 E_0}{\mathrm{d}y^2}(y_0)(y-y_0)^2} \\
+        H_x &= - \frac{1}{2M} \frac{\partial^2}{\partial x^2} \textcolor{red}{+ \frac{1}{2}\frac{\partial^2 V}{\partial x^2}(x_0,y_0) (x-x_0)^2} \\
+        W &=  V(x,y) \textcolor{NavyBlue}{- V(x,y_0)} \textcolor{Purple}{- \frac{1}{2} \frac{\mathrm{d}^2 E_0}{\mathrm{d}y^2}(y_0)(y-y_0)^2}   \textcolor{red}{+ \underset{x\rightarrow x_0}{o} (x-x_0)^2}
+    \end{array}\right.
+\end{equation}
+
+On sait traiter (différences finies ou solutions analytiques séparables) le cas des deux hamiltoniens séparés $H_x$ et $H_y$, puis leur somme. Dans un premier temps on négligera ce terme $W$. Ensuite, on se place en $(x,y_0)$ pour écrire le développement limité de $V$ dans le terme $W$:
+\begin{equation}
+    V(x,y) - V(x,y_0) = \frac{\partial V}{\partial y}(x,y_0)(y-y_0) + \frac{1}{2}\frac{\partial^2V}{\partial y^2}(x,y_0)(y-y_0)^2 + \underset{y\rightarrow y_0}{o} (y-y_0)^2
+\end{equation}
+D'où finalement
+\begin{multline}
+    W = \frac{\partial V}{\partial y}(x,y_0)(y-y_0) + \frac{1}{2}\frac{\partial^2V}{\partial y^2}(x,y_0)(y-y_0)^2 + \underset{y\rightarrow y_0}{o} (y-y_0)^2 \\ - \frac{1}{2} \frac{\mathrm{d}^2 E_0}{\mathrm{d}y^2}(y_0)(y-y_0)^2   \textcolor{red}{+ \underset{x\rightarrow x_0}{o} (x-x_0)^2}
+\end{multline}
+
+
+
+
+    \item En écrivant $1 = \langle \psi(\lambda )| \psi(\lambda ) \rangle = \langle \psi_0| \psi_0 \rangle + 2\lambda \langle \psi_1 | \psi_0 \rangle  + \lambda^2 (2\langle \phi_j | \psi_2 \rangle + \langle \psi_1|\langle \psi_1\rangle) + \mathcal{O}(\lambda^3)$, et les mêmes arguments que précédemment, on obtient $\langle \phi_j |\psi_2\rangle = -\frac{1}{2} \langle \psi_1 | \psi_1\rangle$, soit encore 
+    \begin{equation}
+        \alpha_j^{(2)} =  -\frac{1}{2} \langle \psi_1 | \psi_1 \rangle
+    \end{equation}
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    %% ancien gradient conjugué (équations de bibmath mais c'est pas le même algo que wikipédia aparemment
+    
+    
+    \begin{align}
+    \vect{x}^{k+1} &= \vect{x}^k+\rho_k \vect{d}^k \\
+    \rho_k &= -\frac{\langle \nabla f(\vect{x}^k), \vect{d}^k \rangle}{\langle \vect{d}^k, A\vect{d}^k \rangle}
+\end{align}
+avec
+
+\begin{align}
+    \vect{d}^0 &= -\nabla f(\vect{x}^0) \\
+    \vect{d}^{k+1} &= -\nabla f (\vect{x}^{k+1}) + \frac{\|\nabla f(\vect{x}^{k+1})\|}{\|\nabla f(\vect{x}^{k})\|} \vect{d}^k
+\end{align}
+et
+\begin{align}
+    \nabla f(\vect{x}^0) &= A\vect{x}^0-\vect{b} \\
+    \nabla f(\vect{x}^{k+1}) &= \nabla f(\vect{x}^k) + \rho_k A \vect{d}^k
+\end{align}
+
+
+% ancienne récurrence
+
+Par récurrence montrons que $\vect{x}_k \in V$ avec $V$ stable par 
+
+
+
+
+
+En effet, par récurrence: à l'étape $0$ le gradient de $f$ en $\vect{0}$ vaut $-\vect{b}  \in \mathrm{Vect}(\phi_j)^\intercal$. La direction du pas $\vect{d}^0$ à l'étape $0$ est l'opposé du gradient donc de même par définition, est nul.
+
+
+À chaque étape, on a $\nabla f(\vect{x}^{k+1}) = \underbrace{\nabla f(\vect{x}^k)}_{\in \mathrm{Vect}(\phi_j)^\intercal} +  \underbrace{\rho_k M \vect{d}^k}_{\in \mathrm{Vect}(\phi_j)^\intercal}$ par hypothèse, donc cette somme appartient à l'orthogonal, puis la nouvelle direction $\vect{d}^{k+1}$ est une CL de $\nabla f(\vect{x}^{k+1})$ et de $\vect{d}^k$, puis $\vect{x}^k$, appartiennent également à l'orthogonal, ce qui conclut la récurrence.
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=.5\textwidth]{images/énergie_potentielle_surface.PNG}
+    \caption{Une représentation schématique d'un exemple d'énergie potentielle de surface pour deux paramètres $R_1$ et $R_2$ dans \cite{tully_perspective_2000}. La ligne noire représente les états d'égale énergie pour les électrons. }
+    \label{fig:en_pot_surf}
+\end{figure}
+
+
+
+
+
+
+
+
+ \begin{codejulia}{exemple du calcul parallélisé de opérateur}
+    using CUDA
+    Π = convert(Matrix{Float32}, ΨHBO*ΨHBO');
+    Π_gpu = cu(Π);
+    # 6400×6400 CuArray{Float32, 2, CUDA.Mem.DeviceBuffer}
+    HmEHBO = convert(SparseMatrixCSC{Float32}, H-Diagonal(EHBO*ones(N*N))); 
+    HmEHBO_gpu = cu(HmEHBO);
+    # 6400×6400 CUDA.CUSPARSE.CuSparseMatrixCSC{Float32, Int32} with 31680 stored entries:
+    CUDA.@time HmEHBO_gpu = HmEHBO_gpu*Π_gpu;
+    CUDA.@time HmEHBO_gpu = Π_gpu*HmEHBO_gpu;
+    # 0.147967 seconds (103 CPU allocations: 4.672 KiB) (1 GPU allocation: 156.250 MiB, 0.01% memmgmt time)
+    # 0.505628 seconds (88 CPU allocations: 4.156 KiB) (1 GPU allocation: 156.250 MiB, 6.25% memmgmt time)
+    \end{codejulia}

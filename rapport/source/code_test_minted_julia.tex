@@ -1,0 +1,41 @@
+\begin{minted}[frame=lines,
+framesep=1mm,
+baselinestretch=1,
+bgcolor=white,
+fontsize=\normalsize,
+breaklines=true,
+linenos=false,
+bgcolor=white]{julia}
+∀ ε > 0 ∃ δ > 0 : ∀x,y ∈ ℝ : ||x-y|| < ε ⇒ ||f(x) - f(y)|| < δ
+using KrylovKit
+
+function problem_data(xmin, xmax, ymin, ymax, N, V_fun, m, ħ,kdim)
+    Δx = (xmax-xmin)/N;
+    Δy = (ymax-ymin)/N;
+    Δx² = Δx*Δx;
+    Δy² = Δy*Δy;
+    V = [V_fun(xmin+i*Δx,ymin+j*Δy) for i=0:N-1, j=0:N-1];
+    H_2D,~,~ =  hamiltonian_2D(xmin, xmax, ymin, ymax, Δx, Δx², Δy, Δy², N, V, m, ħ);
+    lowest_energies_y = zeros(N);
+     # lower_eigenvec_y = zeros(N,N); # premier axe: y, second axe x
+    Base.Threads.@threads for j in 1:N # cf https://thomaswiemann.com/assets/teaching/Fall2021-Econ-31720/Econ_31720_discussion_6.pdf
+        H_1Dx,~,~ = hamiltonian_1D(xmin, xmax, Δx, Δx², N, V[:,j], m, ħ);
+        x₀ =  rand(Float64, N);
+        vals, vecs, info = KrylovKit.eigsolve(H_1Dx, x₀, 1, :SR, krylovdim=kdim);
+        lowest_energies_y[j]     = info.converged==1 ? vals[1]    : NaN; # on récupère l'énergie         du niveau fondamental sur la tranche à y fixé
+        # lower_eigenvec_y[j,:]  .= info.converged==1 ? vecs[1][:] : NaN; # on récupère le vecteur propre du niveau fondamental sur la tranche à y fixé
+    end  
+
+    # https://en.wikipedia.org/wiki/Finite_difference_coefficient#Central_finite_difference
+    E₀_at_y₀, ind_y₀ = findmin(lowest_energies_y);
+    y₀               = ind_y₀*Δy + ymin;
+    ∂²yyE₀_at_y₀     = 1/(Δy)^3 * dot([−1/12, 4/3, −5/2, 4/3, −1/12], view(lowest_energies_y, ind_y₀-2:ind_y₀+2));  # on calcule la dérivée seconde  à l'ordre 4 par rapport à y de E₀ en y₀
+    V_at_x₀,  ind_x₀ = findmin(view(V, :, ind_y₀));
+    x₀               = ind_x₀*Δy + xmin;
+#   ∂xV_at_x₀y₀      = 1/Δx     * dot([1/12 −2/3 0 2/3 −1/12], ��2D[ind_x₀,ind_y₀-2:ind_y₀+2]);                   # on calcule la dérivée première à l'ordre 4 par rapport à x du potentiel en x₀,y₀ # doit être nulle !!
+    ∂²xxV_at_x₀y₀    = 1/(Δx)^2 * dot([−1/12, 4/3, −5/2, 4/3, −1/12], view(V, ind_x₀, ind_y₀-2:ind_y₀+2));            # on calcule la dérivée seconde à l'ordre 4 par rapport à x du potentiel en x₀,y₀
+
+    H_2D, ∂²yyE₀_at_y₀, ∂²xxV_at_x₀y₀, lowest_energies_y, ind_y₀, y₀, ind_y₀, x₀, Δx, Δy 
+    
+end
+\end{minted}
