@@ -1872,19 +1872,20 @@ Je me propose de montrer dans ce paragraphe que la complexité asymptotique de l
 
 
 \begin{proposition}
-Au voisinage de $N \rightarrow + \infty$ (i.e. pour $N$ suffisamment grand),  la condition 
+Pour tout $\eta >0$, il existe $N$ suffisamment grand tel que la condition 
 \begin{equation}
 \label{condition_precision_machine}
-    k   \ge - \frac{1}{2}\sqrt{\kappa(R)} \left[\ln \varepsilon - \ln (2 \kappa (R) \| \vect{e}^0\|) \right]
+    k   \ge - \frac{\sqrt{\kappa(R)}}{2-\eta} \left[\ln \varepsilon - \ln (2 \kappa (R) \| \vect{e}^0\|) \right]
 \end{equation}
-est suffisante pour que la précision machine en précision double (FP64) $\varepsilon \approx 10^{-16}$ soit atteinte lors de l'application des gradients conjugués (rappelons que $R$ est la matrice qui apparaît dans \ref{decomp_sous_esp}).
+soit suffisante pour que la précision machine en précision double (FP64) $\varepsilon \approx 10^{-16}$ soit atteinte, i.e. $\|\vect{e}^k \| \le \epsilon$ lors de l'application des gradients conjugués (rappelons que $R$ est la matrice qui apparaît dans \ref{decomp_sous_esp}).
 
 
-En d'autres termes, le nombre $k$ d'itérations nécessaires des gradients conjugués est majoré asymptotiquement par
+En d'autres termes, au voisinage de $N \rightarrow + \infty$ (i.e. pour $N$ suffisamment grand),le nombre $k$ d'itérations nécessaires des gradients conjugués vérifie
 \begin{equation}
     \boxed{k = \mathcal{O}\left( \sqrt{\kappa(R)} \ln \kappa(R)\right)}
 \end{equation}
 \end{proposition}
+avec $R$ matrice carrée de taille $N$.
 
 \begin{proof}
 La condition nécessaire et suffisante sur le nombre d'itérations $k$ pour atteindre la précision machine est (d'après \ref{convergence_grad_conj}) la suivante:
@@ -1892,31 +1893,58 @@ La condition nécessaire et suffisante sur le nombre d'itérations $k$ pour atte
 
 \begin{equation}
 \label{condition_convergence_precision_machine}
-    2 \kappa (R) \left( \frac{\sqrt{\kappa (R)} - 1}{\sqrt{\kappa (R)} + 1} \right)^k \| \vect{e}^0\| \le \varepsilon \Longleftrightarrow  k \ln \left( \frac{\sqrt{\kappa (R)} - 1}{\sqrt{\kappa (R)} + 1} \right)   \le \ln \varepsilon -  \ln (2 \kappa (R) \| \vect{e}^0\|
+    \underbrace{2 \kappa (R) \left( \frac{\sqrt{\kappa (R)} - 1}{\sqrt{\kappa (R)} + 1} \right)^k \| \vect{e}^0\| \le \varepsilon}_{\text{déf. précision machine atteinte}} \Longleftrightarrow  k \ln \left( \frac{\sqrt{\kappa (R)} - 1}{\sqrt{\kappa (R)} + 1} \right)   \le \ln \varepsilon -  \ln \left(2 \kappa (R) \| \vect{e}^0\|\right)
 \end{equation}
 
-D'autre part on a aussi $\kappa(R)= \frac{E_N-E_0}{E_1-E_0} \xrightarrow[N \rightarrow + \infty]{} +\infty$ (cf. équation \ref{decomp_sous_esp}).
 
-Ainsi, en supposant la matrice $R$ suffisamment grande (donc $N$ suffisamment grand, donc la grille suffisamment fine), les énergies de plus en plus hautes pourront être approchées et le conditionnement de $R$ sera suffisamment grand pour écrire son développement asymptotique au voisinage de $+\infty$: $\frac{\sqrt{x}-1}{\sqrt{x}+1}\underset{+\infty}{=} 1 - \frac{2}{\sqrt{x}}+ \frac{1}{x} + o\left(\frac{1}{x}\right)$ et parvenir à 
+
+Nous commençons par écrire le développement asymptotique suivant:\footnote{On peut s'aider en général de \href{https://pari.math.u-bordeaux.fr/}{PARI/gp}
+}
 \begin{equation*}
-     \frac{\sqrt{\kappa (R)} - 1}{\sqrt{\kappa (R)} + 1}  \le 1-\frac{2}{\sqrt{\kappa (R)}} + \frac{1}{(\kappa (R))^{3/2}}
+    \frac{\sqrt{x}-1}{\sqrt{x}+1}\underset{x\rightarrow+\infty}{=} 1 - \frac{2}{\sqrt{x}}+  o\left(\frac{1}{\sqrt{x}}\right)
+\end{equation*}
+Soit  $1>\eta^\prime >0$, nous avons donc:
+\begin{equation*}
+    \frac{\sqrt{x}-1}{\sqrt{x}+1}\underset{x \rightarrow+\infty}{\le} 1 - \frac{2-\eta^\prime}{\sqrt{x}}
 \end{equation*}
 
 
-
-
-Or, un développement limité (ou un rapide calcul automatisé dans \href{https://pari.math.u-bordeaux.fr/}{PARI/gp} pour la vérifiabilité) permet d'obtenir au voisinage de 0: $\ln (1-2x + x^3) \underset{x\rightarrow 0}{=}-2x-2x^2+o(x^2) \underset{x\rightarrow 0}{\le} -2x$ donc lorsque $\kappa(R)$ est grand:
-\begin{equation*}
-   \ln \left(1-\frac{2}{\sqrt{\kappa (R)}} + \frac{1}{(\kappa (R))^{3/2}} \right) \le - \frac{2}{\sqrt{\kappa (R)}}
-\end{equation*}
-
-Par conséquent, la condition \ref{condition_precision_machine} implique vérifiée la chaîne d'inégalités suivantes pour $\kappa(R)$ grand (en partant de la droite):
+D'autre part nous avons le développement limité suivant:
 
 \begin{equation*}
-    k\ln \left( \frac{\sqrt{\kappa (R)} - 1}{\sqrt{\kappa (R)} + 1} \right) \le k\ln \left(1-\frac{2}{\sqrt{\kappa (R)}} + \frac{1}{(\kappa (R))^{3/2}} \right) \le - \frac{2k}{\sqrt{\kappa (R)}} \le \ln \varepsilon - \ln (2 \kappa (R) \| \vect{e}^0\|) 
+    \ln (1-(2-\eta^\prime)y) \underset{y\rightarrow 0}{=}-(2-\eta^\prime)y+o(y) \underset{y\rightarrow 0}{\le} -(2-2\eta^\prime)y
 \end{equation*}
-En ignorant les inégalités intermédiaires on obtient \ref{condition_convergence_precision_machine}, ce qui conclut.
 
+Notons $\eta \longleftrightarrow 2 \eta^\prime$.
+En substituant $y$ par $\frac{1}{\sqrt{x}}$, on obtient  par croissance du $\log$ et par transitivité des inégalités:
+
+\begin{equation*}
+    \ln \left(\frac{\sqrt{x}-1}{\sqrt{x}+1} \right) \underset{x\rightarrow+\infty}{\le} -\frac{2-\eta}{\sqrt{x}}
+\end{equation*}
+
+
+Comme $\kappa(R)= \frac{E_N-E_0}{E_1-E_0} \xrightarrow[N \rightarrow + \infty]{} +\infty$ (cf. équation \ref{decomp_sous_esp}), lorsque $\kappa(R)$ est grand, on obtient en substituant $x$ par $\kappa(R)$ dans la précédente inégalité asymptotique:
+\begin{equation*}
+   \boxed{\ln \left( \frac{\sqrt{\kappa (R)} - 1}{\sqrt{\kappa (R)} + 1}\right) \underset{N \rightarrow+\infty}{\le} - \frac{2-\eta}{\sqrt{\kappa (R)}}}
+\end{equation*}
+
+
+Ainsi, en supposant la matrice $R$ suffisamment grande (i.e. en supposant $N$ suffisamment grand, pour une la grille suffisamment fine), les énergies de plus en plus hautes pourront être approchées et le conditionnement de $R$ noté $\kappa(R)$ sera suffisamment grand pour écrire son développement asymptotique au voisinage de $+\infty$.
+
+
+Par conséquent, la condition \ref{condition_precision_machine} ainsi réécrite:
+\begin{equation*}
+    \boxed{- k\frac{2-\eta}{\sqrt{\kappa (R)}} \le \left[\ln \varepsilon - \ln (2 \kappa (R) \| \vect{e}^0\|) \right]}
+\end{equation*}
+suffit à rendre vraie l'inégalité \ref{condition_convergence_precision_machine}, définition de \og précision machine atteinte \fg{}:
+
+\begin{equation*}
+    k \ln \left( \frac{\sqrt{\kappa (R)} - 1}{\sqrt{\kappa (R)} + 1} \right)   \le -k \frac{(2-\eta)}{\sqrt{\kappa (R)}}  \le \ln \varepsilon -  \ln \left(2 \kappa (R) \| \vect{e}^0\| \right)
+\end{equation*}
+
+par simple transitivité des deux inégalités encadrées précédentes et par positivité de $k$. 
+
+Ceci conclut la démonstration.
 \end{proof}
 
 
